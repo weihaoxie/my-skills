@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "84067028-d34d-45f5-ab87-950b3cd834af",
+  "path": "start-my-day",
+  "path_key": "start-my-day",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/juliye2025/evil-read-arxiv",
+    "subpath": "start-my-day",
+    "branch": null
+  }
+}

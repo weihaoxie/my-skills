@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "9c9a0492-cdf9-4d51-95cf-5873ca006b77",
+  "path": "excalidraw-diagram",
+  "path_key": "excalidraw-diagram",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "axtonliu/axton-obsidian-visual-skills/excalidraw-diagram",
+    "subpath": "excalidraw-diagram",
+    "branch": null
+  }
+}

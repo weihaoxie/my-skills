@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "c748378e-64be-48c3-b940-e10836d2e27b",
+  "path": "firecrawl-research-papers",
+  "path_key": "firecrawl-research-papers",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "skillssh",
+    "ref": "firecrawl/firecrawl-workflows/firecrawl-research-papers",
+    "subpath": "skills\\firecrawl-research-papers",
+    "branch": null
+  }
+}

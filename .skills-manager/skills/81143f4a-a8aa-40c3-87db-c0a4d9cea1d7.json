@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "81143f4a-a8aa-40c3-87db-c0a4d9cea1d7",
+  "path": "conf-papers",
+  "path_key": "conf-papers",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/juliye2025/evil-read-arxiv",
+    "subpath": "conf-papers",
+    "branch": null
+  }
+}

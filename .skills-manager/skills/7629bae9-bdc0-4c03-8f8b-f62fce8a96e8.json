@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "7629bae9-bdc0-4c03-8f8b-f62fce8a96e8",
+  "path": "excalidraw-automate",
+  "path_key": "excalidraw-automate",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/zsviczian/obsidian-excalidraw-plugin/tree/master/docs/AITrainingData/excalidraw-automate",
+    "subpath": "docs\\AITrainingData\\excalidraw-automate",
+    "branch": "master"
+  }
+}

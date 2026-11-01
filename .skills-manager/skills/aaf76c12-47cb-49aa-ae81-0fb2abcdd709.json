@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "aaf76c12-47cb-49aa-ae81-0fb2abcdd709",
+  "path": "extract-paper-images",
+  "path_key": "extract-paper-images",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/juliye2025/evil-read-arxiv",
+    "subpath": "extract-paper-images",
+    "branch": null
+  }
+}

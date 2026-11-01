@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "skill_id": "d7bfe06f-e6b9-48ab-8a3c-f957c27b3057",
+  "path": "tabbit",
+  "path_key": "tabbit",
+  "enabled": true,
+  "tags": [
+    "浏览器"
+  ],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

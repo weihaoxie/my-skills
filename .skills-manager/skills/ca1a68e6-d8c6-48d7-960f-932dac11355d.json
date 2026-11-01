@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "ca1a68e6-d8c6-48d7-960f-932dac11355d",
+  "path": "Zettelkasten Note Creation",
+  "path_key": "zettelkasten note creation",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

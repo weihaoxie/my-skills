@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "0617b02d-889a-4bb7-b77c-afdfde0987a1",
+  "path": "atomic-decomposition",
+  "path_key": "atomic-decomposition",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "import",
+    "ref": null,
+    "subpath": null,
+    "branch": null
+  }
+}

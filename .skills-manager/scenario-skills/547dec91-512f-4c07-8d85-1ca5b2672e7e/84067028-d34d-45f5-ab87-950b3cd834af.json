@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "scenario_id": "547dec91-512f-4c07-8d85-1ca5b2672e7e",
+  "skill_id": "84067028-d34d-45f5-ab87-950b3cd834af",
+  "sort_order": 3,
+  "tools": {
+    "antigravity": true,
+    "claude_code": true,
+    "cline": true,
+    "codebuddy": true,
+    "codex": true,
+    "cursor": true,
+    "deepseek_harness": true,
+    "gemini_cli": true,
+    "github_copilot": true,
+    "hermes": true,
+    "opencode": true,
+    "pi": true,
+    "trae": true,
+    "trae_cn": true,
+    "workbuddy": true
+  }
+}

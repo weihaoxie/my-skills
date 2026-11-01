@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "e7c70dd1-04c3-4292-ad68-a9d5b4402eb8",
+  "path": "paper-analyze",
+  "path_key": "paper-analyze",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/juliye2025/evil-read-arxiv",
+    "subpath": "paper-analyze",
+    "branch": null
+  }
+}

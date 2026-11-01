@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "scenario_id": "547dec91-512f-4c07-8d85-1ca5b2672e7e",
+  "name": "obsidian",
+  "description": "知识管理",
+  "icon": "home",
+  "sort_order": 999
+}
