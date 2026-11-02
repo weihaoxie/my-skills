@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "a2bfa025-ac1d-4bce-803b-f18451b2e691",
+  "path": "paper-analyzer",
+  "path_key": "paper-analyzer",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/zsyggg/paper-craft-skills",
+    "subpath": "skills\\paper-analyzer",
+    "branch": null
+  }
+}
