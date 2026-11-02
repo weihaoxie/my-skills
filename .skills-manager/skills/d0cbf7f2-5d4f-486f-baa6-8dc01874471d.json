@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "d0cbf7f2-5d4f-486f-baa6-8dc01874471d",
+  "path": "daily-papers-notes",
+  "path_key": "daily-papers-notes",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/huangkiki/dailypaper-skills",
+    "subpath": "skills\\daily-papers-notes",
+    "branch": null
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "15ca049b-12ec-47c8-8aaf-2315515b3f20",
+  "path": "github-trending",
+  "path_key": "github-trending",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/huangkiki/dailypaper-skills",
+    "subpath": "skills\\github-trending",
+    "branch": null
+  }
+}

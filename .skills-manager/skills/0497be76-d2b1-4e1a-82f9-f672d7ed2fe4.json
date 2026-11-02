@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "skill_id": "0497be76-d2b1-4e1a-82f9-f672d7ed2fe4",
+  "path": "generate-mocs",
+  "path_key": "generate-mocs",
+  "enabled": true,
+  "tags": [],
+  "source": {
+    "type": "git",
+    "ref": "https://github.com/huangkiki/dailypaper-skills",
+    "subpath": "skills\\generate-mocs",
+    "branch": null
+  }
+}
