@@ -1,0 +1,94 @@
+{
+  "paths": {
+    "obsidian_vault": "D:/xwh/obsidian/myBrain",
+    "zotero_db": "C:/Users/xiewh/Zotero/zotero.sqlite",
+    "zotero_storage": "C:/Users/xiewh/Zotero/storage"
+  },
+  "daily_papers": {
+    "keywords": [
+      "multimodal large language model",
+      "mllm",
+      "lvlm",
+      "vlm",
+      "vision-language model",
+      "vision-language",
+      "multimodal",
+      "visual instruction tuning",
+      "multimodal reasoning",
+      "visual grounding",
+      "referring segmentation",
+      "video understanding",
+      "video segmentation",
+      "embodied ai",
+      "vla",
+      "vision-language-action",
+      "robot manipulation",
+      "robot learning",
+      "grasping",
+      "embodied agent",
+      "image generation",
+      "image editing",
+      "video generation",
+      "diffusion model",
+      "flow matching",
+      "controllable generation",
+      "gaussian avatar",
+      "motion deblur",
+      "llm agent",
+      "agentic",
+      "tool use",
+      "multi-agent",
+      "agent framework",
+      "agent evaluation",
+      "long context",
+      "hallucination",
+      "trustworthy",
+      "ai safety",
+      "evaluation benchmark",
+      "data selection",
+      "model efficiency"
+    ],
+    "negative_keywords": [
+      "weather forecast",
+      "climate prediction",
+      "wireless sensor network",
+      "blockchain",
+      "cryptocurrency"
+    ],
+    "domain_boost_keywords": [
+      "multimodal",
+      "vision-language",
+      "lvlm",
+      "vla",
+      "embodied",
+      "agentic",
+      "diffusion",
+      "flow matching",
+      "hallucination",
+      "benchmark",
+      "long-context",
+      "visual grounding"
+    ],
+    "arxiv_categories": [
+      "cs.CV",
+      "cs.CL",
+      "cs.LG",
+      "cs.AI",
+      "cs.RO"
+    ],
+    "research_interests": [
+      "Multimodal large language models and vision-language models: MLLM/LVLM architecture and training, visual instruction tuning, multimodal reasoning, visual grounding and referring segmentation, video understanding, and attention analysis or interpretability inside LVLMs.",
+      "Embodied intelligence: vision-language-action (VLA) models, robot manipulation and learning, grasping, embodied agents, and sim-to-real transfer.",
+      "Image and video generation and editing: diffusion models, flow matching, controllable generation, personalization, Gaussian avatars, and motion deblurring or other low-level vision tied to generative pipelines.",
+      "LLM agents: agentic systems, tool use, multi-agent collaboration, agent frameworks and agent evaluation or auditing, long-context handling, and data selection for training.",
+      "Trustworthiness and evaluation of large models: hallucination measurement and mitigation, safety of fine-tuned models including medical AI safety, benchmarks and honest diagnostic studies."
+    ],
+    "project_queries": [
+      "\"multimodal\" in:name,description",
+      "\"vision-language\" in:name,description",
+      "\"vision-language-action\" in:name,description",
+      "\"LLM agent\" in:name,description",
+      "\"text-to-image\" in:name,description"
+    ]
+  }
+}
