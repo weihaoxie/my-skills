@@ -1,0 +1,1969 @@
+﻿ReVEAL: Eliciting Role-Aware Latent Visual Evidence from MLLMs for Reasoning Video Object Segmentation
+Skip to main content
+Report GitHub Issue
+Title:
+Content selection saved. Describe the issue below:
+Description:
+Submit without GitHub
+Submit in GitHub
+Why HTML?
+Report Issue
+Back to Abstract
+Download PDF
+Contents
+Reading mode
+Colour theme
+Abstract
+1 Introduction
+2 Related Work
+2.1 Multimodal Large Language Models
+2.2 Referring and Reasoning Video Object Segmentation
+2.3 Visual Evidence in MLLM Reasoning
+3 Method
+Taxonomy of VETs.
+Obtaining VET Attention Maps.
+3.1 Learning Video Reasoning with VETs
+Supervising Thinking-with-video Reasoning.
+Aligning Attention Maps with Visual Regions.
+Final Training Objective.
+Training Data Construction.
+3.2 From VET Attention Maps to Segmentation Masks
+Contrastive Attention Fusion.
+SAM2 Prompting and Mask Generation.
+4 Experiments
+Datasets and metrics.
+Implementation Details.
+4.1 Main Results
+Masks with Attn.
+Masks with SAM2.
+4.2 Ablation Study
+Thinking-with-video Paradigm for ReVOS.
+Training Components.
+VET Fusion at Inference.
+MLLM Backbone Scalability.
+Segmentation Backbone Scalability.
+Qualitative Analysis.
+5 Conclusion
+References
+A ReVEAL-47K Training Dataset
+A.1 Dataset Overview
+A.2 Annotation Prompts
+Stage 1: Mask-conditioned Target Description.
+Stage 2: Original Video CoT Generation.
+Stage 3: VET-Augmented Reasoning Trace Construction.
+Stage 4: Quality control.
+B More Details of ReVEAL
+B.1 Dynamic Attention Layer Router
+B.2 ReVEAL System Prompt
+B.3 Training and Inference Settings
+C Additional Experimental Analysis
+C.1 Additional Quantitative Results
+Inference Efficiency.
+Motion-grounded Video Reasoning Performance.
+C.2 Additional Ablation Studies
+Sensitivity to the CAGL Weights.
+VET Fusion Strategies on Qwen2.5VL-7B.
+DALR Top- k k Ablation.
+DALR Selection Distribution.
+Sensitivity to the Background Suppression Weight.
+Number of Sampled Point Prompts.
+D More Visualizations
+D.1 More Comparisons with Other Methods
+D.2 More Role-Token Attention Map Visualizations
+D.3 Failure Case Analysis and Limitations
+Failure cases.
+Limitations.
+License: CC BY 4.0
+arXiv:2610.41257v1 [cs.CV] 30 Oct 2026
+ReVEAL: Eliciting Role-Aware Latent Visual Evidence from MLLMs for Reasoning Video Object Segmentation
+Zhongyuan Bao
+Affiliation:聽 Fudan University
+鈥冣€?/span>
+Cunjie He
+Affiliation:聽 Fudan University
+鈥冣€?/span>
+Lejun Zhang
+Affiliation:聽 New York University
+鈥冣€?/span>
+Zenglin Xu
+Affiliation:聽 Fudan University
+鈥冣€?/span>
+Yanwei Fu
+Affiliation:聽 Fudan University
+Abstract
+Reasoning video object segmentation (ReVOS) requires segmenting the target specified by an implicit query throughout a video.
+Existing MLLM-based methods typically require costly cross-model alignment, tying MLLM training to a downstream segmentation model.
+We present ReVEAL , a decoupled thinking-with-video framework for ReVOS that elicits role-aware latent visual evidence from MLLM reasoning to directly guide segmentation.
+ReVEAL introduces Visual Evidence Tokens (VETs) into video reasoning to associate necessary visual regions or entities with target, background, or distractor roles, while a Dynamic Attention Layer Router adaptively aggregates VET-to-video attention across layers into role-specific grounding evidence.
+We train the MLLM to perform VET-augmented reasoning on our constructed ReVEAL-47K dataset, with a Contrastive Attention Grounding Loss as auxiliary supervision to apply role-specific constraints to VET attention and optimize layer routing for reliable latent grounding.
+At inference, ReVEAL identifies the target through this thinking-with-video process and fuses the resulting role-specific evidence to guide a frozen SAM2 in predicting target masks.
+Experiments on five benchmarks show that ReVEAL outperforms alignment-free baselines and remains competitive with alignment-based methods.
+鈥?/sup> 鈥?/sup> footnotetext: Project Page: https://github.com/Lexarymade/ReVEAL
+1 Introduction
+Reasoning Video Object Segmentation (ReVOS) aims to segment target objects throughout a video according to free-form and often implicit language expressions. Unlike conventional referring video object segmentation (RVOS), the target may not be identifiable from a single frame or an explicit category name. Instead, it relies on the model鈥檚 ability to perceive and understand the video content in relation to the query, such as identifying 鈥渢he object used to keep the drink cold鈥?/em>. This makes Multimodal Large Language Models (MLLMs)聽 ( Liu et al., 2023 ; Bai et al., 2023 ) a natural backbone for ReVOS. However, the challenge is not only to understand the expression, but also to connect such understanding to the visual evidence that supports a consistent object mask across time.
+Since MLLMs do not directly produce pixel masks, existing MLLM-based ReVOS methods typically rely on cross-modal alignment with an external segmenter, making MLLM training dependent on the downstream segmentation model. Existing approaches often introduce a dedicated segmentation token, such as <SEG> , and align its hidden representation with the prompt space of an external segmenter聽 ( Kirillov et al., 2023 ; Ravi et al., 2025 ) .
+Although straightforward for mask generation, such design incurs additional training costs and ties the framework to a specific MLLM鈥搒egmenter pair, complicating adaptation to alternative backbones and downstream settings.
+Recent reasoning MLLMs adopt a thinking-with-images paradigm that incorporates visual primitives into intermediate chain-of-thoughts (CoT) steps, using boxes and points聽 ( OpenAI, 2025 ; Liu et al., 2025b ; Wang et al., 2025b ) or special tokens聽 ( Qin et al., 2025 ; Su et al., 2025 ; Zhou et al., 2026 ) . This paradigm extends to thinking-with-video, where spatio-temporal cues serve as intermediate references for reasoning across frames聽 ( Zhang et al., 2025 ; Meng et al., 2025 ) . Interactive video segmentation models such as SAM2聽 ( Ravi et al., 2025 ) likewise accept spatial primitives as prompts for object identification and mask propagation, providing a natural interface through which visual evidence produced during MLLM reasoning can directly guide segmentation聽 ( Kao et al., 2025 ) .
+Yet these primitives are typically limited to selected keyframes聽 ( Gong et al., 2025a ; Zhong et al., 2026 ) , providing only sparse grounding evidence across the video. Causal self-attention, on the other hand, offers a denser alternative聽 ( Vaswani et al., 2017 ) : text tokens attend to visual tokens across preceding frames, yielding video-wide attention maps with spatial grounding cues聽 ( Li et al., 2025 ) , although these cues may not reliably localize the corresponding regions聽 ( Jang et al., 2026 ) .
+DecAF聽 ( Han et al., 2025 ) relies on a tailored multi-rollout procedure to obtain object and background attention maps for segmentation, incurring substantial inference cost without leveraging video reasoning itself.
+This motivates us to explore whether an MLLM can produce the grounding evidence needed for segmentation as part of its own video reasoning within a single response.
+Figure 1: Overview of ReVEAL. Previous methods mainly involve the segmenter during training or rely on multiple MLLM queries at inference to obtain grounding signals. In contrast, ReVEAL adopts a decoupled ReVOS framework that elicits internal visual evidence from the MLLM鈥檚 own video reasoning, enabling alignment-free integration with an external segmenter.
+To this end, we present ReVEAL , a thinking-with-video framework for ReVOS that elicits role-aware latent visual evidence from MLLM reasoning to guide segmentation.
+ReVEAL introduces Visual Evidence Tokens (VETs) to mark necessary visual regions or entities as target ( <OBJ> ), background ( <BG> ), or distractors ( <NEG> ) during reasoning.
+A Dynamic Attention Layer Router (DALR) learns to adaptively aggregate their attention over preceding visual tokens across Transformer layers into role-specific evidence maps.
+To enable the MLLM to elicit faithful role-aware latent visual evidence through video reasoning, we perform supervised fine-tuning (SFT) for VET-augmented reasoning on our constructed ReVEAL-47K dataset, using a Contrastive Attention Grounding Loss (CAGL) as auxiliary supervision to optimize layer routing and apply role-specific constraints to VET attention over video tokens for reliable latent grounding.
+At inference, ReVEAL identifies the target through VET-augmented video reasoning. DALR then aggregates VET-to-video attention from the CoT across Transformer layers into role-specific evidence.
+These attention maps are then contrastively fused, and point prompts are sampled from high-confidence regions to guide a frozen external SAM2 in predicting the target masks, forming an alignment-free interface between MLLM reasoning and video object segmentation.
+In a nutshell, our contributions are summarized as follows:
+鈥?/span>
+We present ReVEAL , a decoupled thinking-with-video framework that elicits role-aware latent visual evidence during MLLM reasoning to guide segmentation without cross-model alignment.
+鈥?/span>
+We equip the MLLM with this capability by combining reasoning supervision on ReVEAL-47K with CAGL for attention grounding over layers adaptively selected and weighted by DALR .
+鈥?/span>
+We demonstrate that internal signals from MLLM reasoning can provide effective grounding cues for video object segmentation through experiments on five RVOS and ReVOS benchmarks.
+2 Related Work
+2.1 Multimodal Large Language Models
+Building on the success of LLMs in natural language processing, image MLLMs extend language models to visual inputs by bridging visual features into the language model through cross-attention resamplers聽 ( Alayrac et al., 2022 ) , querying transformers聽 ( Li et al., 2023 ; Dai et al., 2023 ) , or projection-based visual instruction tuning聽 ( Liu et al., 2023 ; Zhu et al., 2024 ) . Subsequent systems further scale visual backbones and training data to improve general vision鈥搇anguage capabilities聽 ( Chen et al., 2024b ; Bai et al., 2023 ; Li et al., 2024 ; Wang et al., 2024 ) . Video MLLMs extend this paradigm to video by incorporating sampled-frame representations and temporal modeling聽 ( Zhang et al., 2023 ; Maaz et al., 2024 ; Lin et al., 2024 ; Li et al., 2026 ) . Beyond general video understanding, recent work increasingly adopts video MLLMs as general-purpose backbones for downstream tasks that require fine-grained perception and reasoning, including dense video captioning聽 ( Chen et al., 2024a ; Xu et al., 2024 ) , temporal grounding聽 ( Ren et al., 2024a ; Huang et al., 2024a ) , subject-specific video question answering聽 ( Yuan et al., 2025c ; Lian et al., 2025 ) , and embodied spatial reasoning聽 ( Yang et al., 2025 ) .
+We extend this line of research to ReVOS by leveraging MLLMs鈥?spatio-temporal reasoning capabilities to identify target objects specified by complex queries.
+2.2 Referring and Reasoning Video Object Segmentation
+Referring Video Object Segmentation (RVOS) segments an object in a video based on a natural language expression. Early methods focus on explicit expressions through cross-modal fusion or query propagation聽 ( Seo et al., 2020 ; Botach et al., 2022 ; Wu et al., 2022 ) . Reasoning Video Object Segmentation (ReVOS) extends this task to implicit queries that identify targets through their functions, behaviors, or relations to other objects, requiring more complex reasoning聽 ( Yan et al., 2024 ) .
+Most MLLM-based methods interpret implicit queries and learn cross-modal alignment by mapping the hidden state of a special <SEG> token to a downstream segmenter鈥檚 prompt space for mask prediction聽 ( Lai et al., 2024 ; Yan et al., 2024 ; Bai et al., 2024 ; Jin et al., 2026 ; Yuan et al., 2025a ; Lin et al., 2025 ; Gong et al., 2025b ) .
+Recent work promotes this alignment indirectly through reinforcement learning, using SAM2-based segmentation rewards to optimize key-frame selection and MLLM-generated bounding boxes聽 ( Gong et al., 2025a ; Zhong et al., 2026 ) .
+Both strategies tie MLLM training to a downstream segmenter, leaving the potential of native MLLM reasoning as an independent source of visual grounding evidence underexplored聽 ( Kao et al., 2025 ) .
+In contrast, we train the MLLM under a thinking-with-video paradigm to elicit latent grounding evidence from video reasoning and use this evidence to guide an external segmenter at inference.
+2.3 Visual Evidence in MLLM Reasoning
+OpenAI-o3聽 ( OpenAI, 2025 ) introduces a thinking-with-images paradigm that incorporates references to visual regions into intermediate reasoning steps. Recent methods explicitly refer to these regions using boxes and points聽 ( Liu et al., 2025b ; Wang et al., 2025b ) or special tokens representing masks and image patches聽 ( Qin et al., 2025 ; Su et al., 2025 ; Yuan et al., 2025b ) .
+This idea also extends to thinking-with-video, where spatio-temporal cues serve as references for video reasoning聽 ( Meng et al., 2025 ) .
+However, generating such references throughout a video becomes cumbersome for dense video prediction. Instead, attention from output tokens to the preceding multimodal context provides a potential source of latent grounding evidence by highlighting visual regions associated with token semantics聽 ( Kang et al., 2025 ; Wu et al., 2025 ; Li et al., 2025 ; Hu et al., 2026 ; Vaswani et al., 2017 ) .
+Despite this potential, raw attention is often noisy and susceptible to attention sinks聽 ( Huang et al., 2024b ; Darcet et al., 2024 ) , limiting its reliability as visual evidence.
+InterRVOS聽 ( Jin et al., 2026 ) constrains attention to relevant object regions to enrich semantic representations during cross-model alignment, whereas DecAF聽 ( Han et al., 2025 ) aggregates attention maps across multiple queries for visual grounding.
+In contrast, ReVEAL derives role-aware latent visual evidence directly from video reasoning and fuses those cues for more accurate target localization.
+3 Method
+Reasoning video object segmentation (ReVOS) aims to segment the target specified by an implicit query throughout a video. We propose ReVEAL, a decoupled thinking-with-video framework that uses role-aware latent evidence from MLLM reasoning to guide segmentation.
+During training, the MLLM learns to use VETs as role-specific semantic anchors for necessary visual regions or entities, with spatio-temporal grounding constraints applied directly to its own attention rather than through alignment with a downstream segmenter.
+At inference, ReVEAL derives role-specific latent visual evidence through VET-augmented video reasoning and fuses this evidence as grounding signals to guide a frozen SAM2 in predicting target masks.
+Figure 2: Training of ReVEAL. We train the MLLM to perform VET-augmented video reasoning using cross-entropy loss, with CAGL providing auxiliary role-specific constraints on VET-to-video attention for reliable latent grounding.
+Taxonomy of VETs.
+ReVEAL augments the MLLM vocabulary 饾挶 orig \mathcal{V}_{\mathrm{orig}} with three role-specific VETs: <OBJ> specifies the referred target, <NEG> identifies the foreground distractor to exclude, and <BG> indicates the background region to suppress:
+饾挶 = 饾挶 orig 鈭?/mo> 饾挶 VET 饾挶 VET = { <OBJ> , <BG> , <NEG> } \mathcal{V}=\mathcal{V}_{\mathrm{orig}}\cup\mathcal{V}_{\mathrm{VET}}\qquad\mathcal{V}_{\mathrm{VET}}=\{\texttt{<OBJ>},\texttt{<BG>},\texttt{<NEG>}\}
+(1)
+Figure 3: VET Attention Extraction.
+Obtaining VET Attention Maps.
+We treat each VET鈥檚 attention to the preceding visual tokens as a role-specific latent grounding cue. The corresponding attention map is obtained by aggregating these cues across Transformer layers, with later layers selected as candidates because they generally encode stronger semantic signals聽 ( Han et al., 2025 ) .
+Let 鈩?/mi> c \mathcal{L}_{c} denote the set of L c L_{c} candidate layers and A 鈭?/mo> [ 0 , 1 ] L c 脳 N 脳 N A\in[0,1]^{L_{c}\times N\times N} collect their post-softmax attention weights averaged across heads, where N N is the whole sequence length. For the j j -th VET occurrence with role r r , we extract its attention weights over the preceding video tokens and reshape them into layer-wise attention maps a r , j 鈭?/mo> [ 0 , 1 ] L c 脳 T 脳 H v 脳 W v a^{r,j}\in[0,1]^{L_{c}\times T\times H_{v}\times W_{v}} , where T T is the number of frames and H v H_{v} and W v W_{v} denote the height and width of each frame鈥檚 visual token grid.
+However, the layers most relevant to target grounding may vary across different cases聽 ( Kang et al., 2025 ) . Inspired by mixture-of-experts routing聽 ( Liu et al., 2024 ) , we introduce a Dynamic Attention Layer Router (DALR) to dynamically select and weight candidate layers based on the <OBJ> attention maps.
+Given the <OBJ> attention maps for each video-query pair, DALR scores the candidate layers, selects the top- k k layers as 饾挳 鈯?/mo> 鈩?/mi> c \mathcal{S}\subset\mathcal{L}_{c} , and normalizes their scores into routing weights w l w_{l} . These weights determine the contribution of each selected layer when aggregating VET attention during both training and inference. More details are provided in Appendix聽 B .
+3.1 Learning Video Reasoning with VETs
+Supervising Thinking-with-video Reasoning.
+Through SFT, the MLLM learns to identify query-relevant visual entities or regions during video reasoning and place the corresponding role-specific VETs after their names or descriptions, conditioning each VET occurrence on an entity-specific context.
+Given a video V V , a query q q , and a VET-augmented response 饾惍 = ( u 1 , 鈥?/mi> , u M ) \mathbf{u}=(u_{1},\ldots,u_{M}) , we optimize the model using the standard next token prediction objective:
+鈩?/mi> SFT = 鈭?/mo> 鈭?/mo> i = 1 M log p ( u i 鈭?/mo> u < i , V , q ) . \mathcal{L}_{\mathrm{SFT}}=-\sum_{i=1}^{M}\log p\!\left(u_{i}\mid u_{<i},V,q\right).
+(2)
+Let n r 鈥?/mo> ( u ) n_{r}(u) denote the number of occurrences of role r r in response u u . Each response contains n <OBJ> 鈥?/mo> ( u ) = 1 n_{\texttt{<OBJ>}}(u)=1 and n <BG> 鈥?/mo> ( u ) 鈭?/mo> { 0 , 1 } n_{\texttt{<BG>}}(u)\in\{0,1\} , while n <NEG> 鈥?/mo> ( u ) n_{\texttt{<NEG>}}(u) varies with the number of distinct distractors described in the reasoning trace.
+Aligning Attention Maps with Visual Regions.
+Although SFT teaches the model to perform VET-augmented video reasoning to identify relevant visual entities and their semantic roles, it does not ensure that VET attention provides reliable latent grounding evidence. Inspired by AML聽 ( Jin et al., 2026 ) , we introduce the Contrastive Attention Grounding Loss (CAGL) to supervise the spatio-temporal distribution of VET attention using complementary positive and repulsive terms.
+鈩?/mi> CAGL = 鈭?/mo> l 鈭?/mo> 饾挳 w l 鈥?/mo> ( 鈩?/mi> CAGL 鈭?/mo> P l + 位 rep 鈥?/mo> 鈩?/mi> CAGL 鈭?/mo> R l ) . \mathcal{L}_{\mathrm{CAGL}}=\sum_{l\in\mathcal{S}}w_{l}\left(\mathcal{L}_{\mathrm{CAGL-P}}^{l}+\lambda_{\mathrm{rep}}\mathcal{L}_{\mathrm{CAGL-R}}^{l}\right).
+(3)
+Here, w l w_{l} is the routing weight assigned by DALR to layer l l , and 位 rep \lambda_{\mathrm{rep}} balances the repulsive term.
+For each occurrence j j of a role r 鈭?/mo> 饾挮 = { <OBJ> , <BG> } r\in\mathcal{P}=\{\texttt{<OBJ>},\texttt{<BG>}\} , the positive term applies BCE to align its attention distribution with the corresponding ground-truth (GT) region m r 鈭?/mo> [ 0 , 1 ] T 脳 H v 脳 W v m^{r}\in[0,1]^{T\times H_{v}\times W_{v}} :
+鈩?/mi> CAGL 鈭?/mo> P l = 鈭?/mo> r 鈭?/mo> 饾挮 鈭?/mo> j = 1 n r 鈥?/mo> ( u ) BCE 鈦?/mo> ( a l r , j , m r ) , \mathcal{L}_{\mathrm{CAGL-P}}^{l}=\sum_{r\in\mathcal{P}}\sum_{j=1}^{n_{r}(u)}\operatorname{BCE}\!\left(a_{l}^{r,j},m^{r}\right),
+(4)
+During reasoning, the attention maps of the suppressive roles r 鈭?/mo> 鈩?/mi> = { <BG> , <NEG> } r\in\mathcal{R}=\{\texttt{<BG>},\texttt{<NEG>}\} provide suppressive evidence, but leakage into unintended regions may cause erroneous suppression. We therefore apply a repulsive term that penalizes the normalized attention mass within a role-specific forbidden region f r f^{r} .
+Specifically, we define
+f <BG> = m <OBJ> f^{\texttt{<BG>}}=m^{\texttt{<OBJ>}} and
+f <NEG> = m <OBJ> 鈭?/mo> m <BG> f^{\texttt{<NEG>}}=m^{\texttt{<OBJ>}}\cup m^{\texttt{<BG>}} :
+a ^ l r , j = a l r , j 鈭?/mo> a l r , j 鈭?/mo> 1 + 系 , 鈩?/mi> CAGL 鈭?/mo> R l = 鈭?/mo> r 鈭?/mo> 鈩?/mi> 鈭?/mo> j = 1 n r 鈥?/mo> ( u ) 鈭?/mo> log ( 1 鈭?/mo> 鉄?/mo> a ^ l r , j , f r 鉄?/mo> + 系 ) . \hat{a}_{l}^{r,j}=\frac{a_{l}^{r,j}}{\lVert a_{l}^{r,j}\rVert_{1}+\epsilon},\qquad\mathcal{L}_{\mathrm{CAGL-R}}^{l}=\sum_{r\in\mathcal{R}}\sum_{j=1}^{n_{r}(u)}-\log\left(1-\left\langle\hat{a}_{l}^{r,j},f^{r}\right\rangle+\epsilon\right).
+(5)
+Here, 鈭?/mo> a l r , j 鈭?/mo> 1 \lVert a_{l}^{r,j}\rVert_{1} sums the attention over all spatio-temporal locations, and the inner product 鉄?/mo> a ^ l r , j , f r 鉄?/mo> \langle\hat{a}_{l}^{r,j},f^{r}\rangle measures the normalized attention mass within the forbidden region.
+Final Training Objective.
+The final objective combines SFT with CAGL:
+鈩?/mi> = 鈩?/mi> SFT + 位 CAGL 鈥?/mo> 鈩?/mi> CAGL \mathcal{L}=\mathcal{L}_{\mathrm{SFT}}+\lambda_{\mathrm{CAGL}}\,\mathcal{L}_{\mathrm{CAGL}}
+(6)
+Here, 位 CAGL \lambda_{\mathrm{CAGL}} controls the strength of CAGL.
+Training Data Construction.
+To provide supervision for ReVEAL, we construct ReVEAL-47K , a training dataset comprising VET-augmented CoT traces and region-level mask annotations, from multiple training sources聽 ( Lai et al., 2024 ; Khoreva et al., 2018 ; Seo et al., 2020 ; Ding et al., 2023 ; Deng et al., 2025 ; Yan et al., 2024 ) . For each sample, we use GAR聽 ( Wang et al., 2025c ) with the GT mask on a representative frame to obtain a target caption. Conditioned on this caption, the query, and the video frames, Gemini 2.5 Pro聽 ( Comanici et al., 2025 ) generates a CoT response and inserts VETs at the corresponding positions. Qwen3VL聽 ( Bai et al., 2025 ) is used to verify and filter out unreliable samples. The mask annotations include the retained GT mask and a background mask, obtained by taking the complement of the union of the foreground regions predicted by BiRefNet聽 ( Zheng et al., 2024a ) and the target region. More details are provided in Appendix聽 A .
+3.2 From VET Attention Maps to Segmentation Masks
+At inference, ReVEAL identifies the target through VET-augmented video reasoning. DALR adaptively selects and weights Transformer layers to aggregate VET attention into role-specific latent evidence maps, which are then fused to guide mask prediction with a frozen, external SAM2.
+Specifically, the <OBJ> attention is aggregated across the selected layers to form target evidence, whereas attention associated with all <BG> and <NEG> tokens is aggregated as suppressive evidence:
+a obj \displaystyle a^{\mathrm{obj}}
+= 鈭?/mo> l 鈭?/mo> 饾挳 w l 鈥?/mo> a l <OBJ> , 1 , a sup \displaystyle=\sum_{l\in\mathcal{S}}w_{l}a_{l}^{\texttt{<OBJ>},1},\ a^{\mathrm{sup}}
+= 鈭?/mo> r 鈭?/mo> 鈩?/mi> 伪 r 鈥?/mo> 鈭?/mo> j = 1 n r 鈥?/mo> ( u ) 鈭?/mo> l 鈭?/mo> 饾挳 w l 鈥?/mo> a l r , j , \displaystyle=\sum_{r\in\mathcal{R}}\alpha_{r}\sum_{j=1}^{n_{r}(u)}\sum_{l\in\mathcal{S}}w_{l}a_{l}^{r,j},
+(7)
+where 伪 r \alpha_{r} controls the contribution of each suppressive role.
+Contrastive Attention Fusion.
+We fuse the target and suppressive evidence frame by frame. For frame t t , the corresponding slices a t obj , a t sup 鈭?/mo> 鈩?/mi> H v 脳 W v a_{t}^{\mathrm{obj}},a_{t}^{\mathrm{sup}}\in\mathbb{R}^{H_{v}\times W_{v}} are combined by subtracting the suppressive evidence from the target evidence:
+P ~ t = max 鈦?/mo> ( a t obj 鈭?/mo> a t sup , 鈥? ) P t = P ~ t 鈭?/mo> min 鈦?/mo> ( P ~ t ) max 鈦?/mo> ( P ~ t ) 鈭?/mo> min 鈦?/mo> ( P ~ t ) + 系 \tilde{P}_{t}=\max\!\left(a_{t}^{\texttt{obj}}-a_{t}^{\mathrm{sup}},\,0\right)\qquad P_{t}=\frac{\tilde{P}_{t}-\min(\tilde{P}_{t})}{\max(\tilde{P}_{t})-\min(\tilde{P}_{t})+\epsilon}
+(8)
+Here, the minimum and maximum are taken over spatial locations, and 系 \epsilon ensures numerical stability. We then sample points from the fused attention map P t P_{t} as visual prompts for the frozen SAM2.
+SAM2 Prompting and Mask Generation.
+We apply a threshold 蟿 pq \tau_{\mathrm{pq}} to the fused attention map and sample points from the retained regions according to their attention strengths as prompts for SAM2 to generate candidate mask tracklets. Following the SAM2 prompting pipeline of DecAF聽 ( Han et al., 2025 ) , we remove redundant candidates using non-maximum suppression with an IoU threshold 蟿 nms \tau_{\mathrm{nms}} , ranking them by point-attention and SAM2 confidence scores. We then filter the remaining tracklets by their temporal consistency with the retained attention regions using 蟿 trk \tau_{\mathrm{trk}} and propagate them across all frames to produce the final segmentation masks.
+4 Experiments
+Datasets and metrics.
+We evaluate ReVEAL on five RVOS and ReVOS benchmarks: Ref-DAVIS聽 ( Khoreva et al., 2018 ) , Ref-YouTube-VOS聽 ( Seo et al., 2020 ) , MeViS聽 ( Ding et al., 2023 ) , ReVOS聽 ( Yan et al., 2024 ) , and ReasonVOS聽 ( Bai et al., 2024 ) . Following standard practice, we report mask quality using region similarity 饾挜 \mathcal{J} , boundary accuracy 鈩?/mi> \mathcal{F} , and their average 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} .
+Implementation Details.
+ReVEAL uniformly samples six frames from each video as input. We finetune the MLLM using LLaMA-Factory聽 ( Zheng et al., 2024b ) , with the CAGL weight 位 CAGL \lambda_{\mathrm{CAGL}} set to 0.2 and the 位 rep \lambda_{\mathrm{rep}} in CAGL set to 0.1. The router top- k k is set to 6.
+For inference and evaluation, we use SAM2-Hiera-Large聽 ( Ravi et al., 2025 ) as the frozen segmentation model.
+We set 伪 < BG > = 0.5 \alpha_{\mathrm{<BG>}}=0.5 for Qwen2.5-VL and 伪 < BG > = 0.1 \alpha_{\mathrm{<BG>}}=0.1 for Qwen3VL, while using 伪 < NEG > = 1.0 \alpha_{\mathrm{<NEG>}}=1.0 for both.
+All other settings follow the baseline聽 ( Han et al., 2025 ) , using a threshold of 蟿 pq = 0.8 \tau_{\mathrm{pq}}=0.8 , a NMS IoU threshold of 蟿 nms = 0.7 \tau_{\mathrm{nms}}=0.7 , and a tracklet-consistency threshold of 蟿 trk = 0.8 \tau_{\mathrm{trk}}=0.8 .
+Our experiments are conducted on NVIDIA H800 GPUs. More details are provided in Appendix聽 B .
+4.1 Main Results
+Masks with Attn.
+Table聽 2 compares ReVEAL with attention-derived grounding methods under the same Qwen2.5-VL-7B backbone and six frame input setting. ReVEAL achieves the best performance across all benchmarks, outperforming DecAF by 5.7%, 3.0%, and 4.6% 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} on Ref-DAVIS, ReasonVOS, and ReVOS.
+These results indicate that ReVEAL produces attention maps with more complete spatio-temporal coverage of the target regions, providing stronger grounding evidence. Despite these gains, 鈩?/mi> \mathcal{F} remains relatively low because the coarse attention maps lack precise object boundaries and therefore still require a dedicated segmenter for accurate mask prediction.
+Table 1: Comparison of MLLM-based ReVOS methods using attention-derived masks.
+Method
+MLLM
+Ref-DAVIS
+ReasonVOS
+ReVOS (Overall)
+ReVOS (Referring)
+ReVOS (Reasoning)
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+TAM聽 ( Li et al., 2025 )
+Qwen2.5VL-7B
+2.7
+1.8
+3.7
+3.3
+2.7
+3.8
+3.0
+2.8
+3.1
+3.0
+2.9
+3.2
+2.9
+2.7
+3.0
+Loc-Head聽 ( Kang et al., 2025 )
+Qwen2.5VL-7B
+13.0
+16.8
+9.2
+12.2
+17.1
+7.3
+13.3
+18.9
+7.7
+14.1
+20.3
+7.9
+12.5
+17.4
+7.5
+DecAF聽 ( Han et al., 2025 )
+Qwen2.5VL-7B
+23.7
+30.4
+17.1
+19.1
+24.1
+14.1
+19.4
+25.2
+13.5
+21.1
+27.9
+14.3
+17.7
+22.6
+12.7
+ReVEAL (Ours)
+Qwen2.5VL-7B
+29.4
+39.5
+19.2
+22.1
+29.5
+14.8
+24.0
+33.6
+14.4
+25.4
+35.6
+15.3
+22.5
+31.6
+13.5
+Table 2: Main comparison of MLLM-based ReVOS methods.
+Method
+MLLM
+Ref-DAVIS
+ReasonVOS
+ReVOS (Overall)
+MeViS
+Ref-YT-VOS
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+Cross-Model Alignment-Based Methods
+LISA聽 ( Lai et al., 2024 )
+LLaVA-7B
+64.8
+62.2
+67.3
+31.1
+29.1
+33.1
+40.9
+39.1
+42.7
+鈥?/td>
+鈥?/td>
+鈥?/td>
+鈥?/td>
+鈥?/td>
+鈥?/td>
+VISA聽 ( Yan et al., 2024 )
+ChatUniVi-7B
+69.4
+66.3
+72.5
+鈥?/td>
+鈥?/td>
+鈥?/td>
+46.9
+44.9
+49.0
+44.5
+41.8
+47.1
+61.5
+59.8
+63.2
+VideoLISA聽 ( Bai et al., 2024 )
+LLaVA-Phi-3-V
+68.8
+64.9
+72.7
+47.5
+45.1
+49.9
+鈥?/td>
+鈥?/td>
+鈥?/td>
+44.4
+41.3
+47.6
+63.7
+61.7
+65.7
+InstructSeg聽 ( Wei et al., 2025 )
+Mipha-3B
+71.1
+67.3
+74.9
+鈥?/td>
+鈥?/td>
+鈥?/td>
+54.5
+52.0
+56.9
+鈥?/td>
+鈥?/td>
+鈥?/td>
+67.5
+65.4
+69.5
+GLUS聽 ( Lin et al., 2025 )
+LLaVA-7B
+鈥?/td>
+鈥?/td>
+鈥?/td>
+49.9
+47.5
+52.4
+54.9
+52.4
+57.3
+51.3
+48.5
+54.2
+67.3
+65.5
+69.0
+VRS-HQ聽 ( Gong et al., 2025b )
+ChatUniVi-7B
+76.0
+72.6
+79.4
+54.9
+52.6
+57.3
+59.1
+56.6
+61.6
+50.6
+47.6
+53.7
+70.4
+68.3
+72.5
+RGA3聽 ( Wang et al., 2025a )
+Qwen2.5VL-7B
+72.8
+68.3
+77.3
+53.6
+51.3
+56.0
+58.0
+55.9
+60.0
+50.1
+47.4
+52.8
+68.5
+66.8
+70.1
+UniPixel聽 ( Liu et al., 2025a )
+Qwen2.5VL-7B
+76.4
+72.7
+80.1
+鈥?/td>
+鈥?/td>
+鈥?/td>
+63.7
+61.7
+65.7
+55.8
+53.2
+58.3
+71.0
+69.5
+72.4
+Veason-R1聽 ( Gong et al., 2025a )
+Qwen2.5VL-7B
+鈥?/td>
+鈥?/td>
+鈥?/td>
+59.9
+56.0
+63.8
+61.3
+58.2
+64.4
+52.2
+48.4
+56.0
+鈥?/td>
+鈥?/td>
+鈥?/td>
+Cross-Model Alignment-Free Methods
+Loc-Head聽 ( Kang et al., 2025 )
+Qwen2.5VL-7B
+64.6
+60.2
+68.9
+41.1
+37.9
+44.3
+47.0
+43.3
+50.7
+39.4
+35.2
+43.6
+51.0
+46.8
+55.2
+DecAF聽 ( Han et al., 2025 )
+Qwen2.5VL-7B
+75.2
+70.9
+79.5
+63.9
+60.5
+67.2
+54.2
+50.1
+58.2
+48.1
+44.0
+52.1
+59.9
+56.2
+63.5
+CoT-RVS聽 ( Kao et al., 2025 )
+Gemma3-12B
+74.6
+70.9
+78.3
+50.7
+47.5
+54.0
+47.1
+43.4
+50.9
+44.2
+40.3
+48.1
+鈥?/td>
+鈥?/td>
+鈥?/td>
+ReVEAL (Ours)
+Qwen2.5VL-7B
+77.7
+74.1
+81.3
+65.1
+61.9
+68.3
+59.0
+56.3
+61.6
+47.7
+44.7
+50.6
+69.2
+67.2
+71.1
+ReVEAL (Ours)
+Qwen3VL-8B
+80.7
+77.3
+84.0
+66.1
+62.9
+69.2
+61.6
+58.9
+64.3
+49.1
+46.2
+52.0
+71.3
+69.3
+73.3
+Masks with SAM2.
+As shown in Table聽 2 , among alignment-free methods, ReVEAL achieves the best performance across all benchmarks. With the same backbone, it outperforms DecAF by 4.8% and 9.3% 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} on ReVOS and Ref-YouTube-VOS, respectively, and consistently outperforms CoT-RVS despite using a smaller backbone. These results suggest that the high-attention regions identified by ReVEAL provide reliable visual prompts for mask generation.
+While alignment-based methods benefit from cross-model optimization between the MLLM and the segmentation module, ReVEAL approaches the performance of RGA-3 under the same Qwen2.5-VL-7B backbone without costly cross-model adapter training. With Qwen3-VL-8B, ReVEAL achieves the highest scores on Ref-DAVIS and ReasonVOS, surpassing the strongest alignment-based results by 4.3% and 6.2% 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} , respectively, while substantially narrowing the gap on ReVOS, MeViS, and Ref-YouTube-VOS. Additional results are provided in the Appendix聽 C.1
+4.2 Ablation Study
+In this section, we conduct comprehensive ablation studies. By default, results are reported with ReVEAL-Qwen3VL-8B. Additional results are provided in the Appendix聽 C.2 .
+Thinking-with-video Paradigm for ReVOS.
+Table聽 7 evaluates the effect of the thinking-with-video paradigm. Without CoT, the model learns to emit VETs within a simple response (e.g., Sure, it is <BG> , <NEG> and <OBJ> .)
+With CoT, attention-derived mask 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} improves by 1.1% and 1.7% on Ref-DAVIS and ReasonVOS, respectively, while the corresponding SAM2 masks improve by 3.1% and 12.2%.
+These results show that VET-augmented video reasoning improves grounding beyond simple outputs, providing more effective guidance for downstream segmentation.
+Training Components.
+Table聽 7 shows that SFT alone is insufficient for reliable VET grounding. CAGL-P improves target coverage in latent evidence, while CAGL-R makes attention scores in the fused maps more reliable for point selection. DALR further improves evidence aggregation over fixed-layer selection schemes. Together, these components help ReVEAL elicit faithful role-aware visual evidence during video reasoning to guide segmentation.
+Table 3: Effect of the paradigm.
+Mask
+Reason
+Type
+饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F}
+Ref-D
+ReasV
+w/o CoT
+29.1
+18.9
+w/ CoT
+30.2
+20.6
+Attn
+螖 \Delta
++1.1
++1.7
+w/o CoT
+77.6
+53.9
+w/ CoT
+80.7
+66.1
+SAM2
+螖 \Delta
++3.1
++12.2
+Table 4: Ablation of the training components. First three methods aggregate VET attention maps over six manually selected layers.
+CAGL-P
+CAGL-R
+DALR
+Attn Mask
+SAM2 Mask
+Ref-D
+ReasV
+Ref-D
+ReasV
+鈥?/td>
+鈥?/td>
+鈥?/td>
+9.2
+6.4
+32.5
+22.6
+鉁?/td>
+鈥?/td>
+鈥?/td>
+29.5
+22.9
+76.4
+61.5
+鉁?/td>
+鉁?/td>
+鈥?/td>
+29.9
+21.0
+79.3
+64.9
+鉁?/span>
+鉁?/span>
+鉁?/span>
+30.2
+20.6
+80.7
+66.1
+Table 5: Comparisons across more MLLM backbones.
+Method
+MLLM
+Size
+Ref-DAVIS
+ReasonVOS
+ReVOS (Overall)
+ReVOS (Referring)
+ReVOS (Reasoning)
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+DecAF
+InternVL3
+62.8
+56.9
+68.6
+58.9
+55.1
+62.7
+47.4
+43.7
+51.2
+51.7
+47.9
+55.5
+43.2
+39.5
+46.8
+ReVEAL
+InternVL3
+77.8
+74.2
+81.4
+63.6
+60.9
+66.3
+57.4
+54.7
+60.1
+62.1
+59.6
+64.6
+52.7
+49.8
+55.6
+DecAF
+Qwen2VL
+64.1
+59.4
+68.9
+52.5
+49.0
+56.0
+45.3
+41.6
+49.0
+52.7
+48.9
+56.4
+37.9
+34.3
+41.5
+ReVEAL
+Qwen2VL
+74.9
+71.3
+78.5
+61.2
+58.4
+64.1
+55.9
+53.2
+58.6
+60.7
+58.0
+63.3
+51.1
+48.4
+53.8
+DecAF
+Qwen2.5VL
+58.1
+53.6
+62.6
+52.9
+49.6
+56.2
+39.7
+35.6
+43.8
+46.5
+42.1
+50.9
+32.9
+29.1
+36.7
+ReVEAL
+Qwen2.5VL
+74.5
+70.2
+78.8
+54.0
+51.3
+56.8
+51.6
+48.6
+54.7
+56.9
+54.1
+59.6
+46.4
+43.0
+49.7
+ReVEAL
+Qwen3VL
+77.1
+73.4
+80.8
+60.5
+57.6
+63.4
+58.0
+55.3
+60.8
+62.2
+59.7
+64.7
+53.9
+50.9
+56.9
+ReVEAL
+Qwen3VL
+80.7
+77.3
+84.0
+66.1
+62.9
+69.2
+61.6
+58.9
+64.3
+65.0
+62.5
+67.5
+58.3
+55.4
+61.1
+Table 6: Ablation across different segmentation backbones.
+Model
+Ref-D
+ReasV
+Ref-YT
+SAM2-Hiera-T
+79.1
+64.0
+67.5
+SAM2-Hiera-S
+78.7
+64.3
+69.0
+SAM2-Hiera-B
+79.9
+67.0
+70.3
+SAM2-Hiera-L
+80.7
+66.1
+71.3
+SAM3
+79.6
+67.6
+71.4
+Table 7: Inference-time ablation of different VET attention map fusion strategies. Here, we report the 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} metric.
+MLLM
+<OBJ>
+<BG>
+<NEG>
+Attn Mask
+SAM2 Mask
+Ref-D
+ReasV
+Ref-D
+ReasV
+Qwen3VL-8B
+鉁?/td>
+鈥?/td>
+鈥?/td>
+27.2
+18.8
+78.4
+63.2
+鉁?/td>
+鈥?/td>
+鉁?/td>
+28.8
+19.6
+80.7
+65.8
+鉁?/td>
+鉁?/td>
+鈥?/td>
+31.1
+23.4
+78.5
+64.4
+鉁?/span>
+鉁?/span>
+鉁?/span>
+30.2
+20.6
+80.7
+66.1
+VET Fusion at Inference.
+Table聽 7 compares different VET attention combinations from the same CoT at inference. Adding <BG> improves attention-mask scores by 3.9% and 4.6% on Ref-DAVIS and ReasonVOS, while adding <NEG> instead yields better SAM2 segmentation despite lower attention-mask scores. This suggests that background suppression refines the overall target coverage, whereas distractor suppression makes attention peaks more discriminative.
+Combining all three VET types yields the best overall performance, supporting the effectiveness of our role design.
+MLLM Backbone Scalability.
+As shown in Table聽 7 , ReVEAL consistently outperforms the baseline across diverse MLLM backbones, demonstrating its generalizability.
+We further observe that the performance generally improves with backbone size. For example, scaling Qwen3VL from 4B to 8B improves 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} by 3.6% on Ref-DAVIS and ReVOS and 5.6% on ReasonVOS, suggesting that larger MLLMs provide more reliable visual evidence for downstream segmentation.
+Segmentation Backbone Scalability.
+ReVEAL uses latent visual evidence from MLLM reasoning to guide segmentation without requiring alignment to a specific segmenter. As shown in Table聽 7 , the latent grounding evidence generalizes across smaller SAM2 variants and SAM3聽 ( Carion et al., 2026 ) on all three benchmarks, with minor performance variations due to the segmenter鈥檚 own capability.
+Qualitative Analysis.
+We provide qualitative analysis of ReVEAL from two perspectives. First, Fig.聽 4 shows that ReVEAL reduces noise in the fused attention maps compared with DecAF, resulting in more precise focus on the target object and more accurate grounding for challenging queries requiring implicit reasoning.
+Second, Fig.聽 5 shows that different VETs generally attend to regions consistent with their intended roles.
+Additional cases are provided in Appendix聽 D .
+Figure 4: Qualitative comparison of ReVEAL and DecAF on a query requiring reasoning.
+Figure 5: Visualization of ReVEAL鈥檚 response and role-specific VET attention maps.
+5 Conclusion
+We presented ReVEAL, a decoupled thinking-with-video framework for alignment-free ReVOS. ReVEAL enables the MLLM to identify targets through video reasoning and derive grounding cues from role-aware VET attention, without requiring cross-model alignment with the segmenter during training. At inference, ReVEAL derives role-specific evidence from VET-augmented video reasoning to guide a frozen SAM2 for target mask prediction. Experiments across five RVOS and ReVOS benchmarks demonstrate the effectiveness and generalizability of ReVEAL. Overall, our work highlights the potential of internal signals from MLLM reasoning to bridge high-level video understanding and dense visual prediction.
+AI Use Statement
+We use generative AI tools in constructing the ReVEAL-47K training dataset, including video CoT annotation and formatting collected samples into VET-augmented CoT traces, as described in Section聽 3.1 and the Appendix. GPT is used to polish the manuscript, including language refinement and grammar checking of our original draft. We do not use AI tools for other research tasks requiring disclosure. We review all AI-assisted content and take full responsibility for the final paper.
+References
+Alayrac et al. (2022)
+J. Alayrac, J. Donahue, P. Luc, A. Miech, I. Barr, Y. Hasson, K. Lenc, A. Mensch, K. Millican, M. Reynolds, et al.
+Flamingo: a visual language model for few-shot learning .
+Advances in neural information processing systems 35 , pp.聽23716鈥?3736 .
+Cited by: 搂2.1 .
+Bai et al. (2023)
+J. Bai, S. Bai, S. Yang, S. Wang, S. Tan, P. Wang, J. Lin, C. Zhou, and J. Zhou
+Qwen-vl: a versatile vision-language model for understanding, localization, text reading, and beyond .
+arXiv preprint arXiv:2308.12966 .
+Cited by: 搂1 ,
+搂2.1 .
+Bai et al. (2025)
+S. Bai, Y. Cai, R. Chen, K. Chen, X. Chen, Z. Cheng, L. Deng, W. Ding, C. Gao, C. Ge, et al.
+Qwen3-vl technical report .
+arXiv preprint arXiv:2511.21631 .
+Cited by: 搂3.1 .
+Bai et al. (2024)
+Z. Bai, T. He, H. Mei, P. Wang, Z. Gao, J. Chen, L. Liu, Z. Zhang, and M. Z. Shou
+One token to seg them all: language instructed reasoning segmentation in videos .
+Advances in Neural Information Processing Systems 37 , pp.聽6833鈥?859 .
+Cited by: 搂2.2 ,
+搂4 ,
+Table 2 .
+Botach et al. (2022)
+A. Botach, E. Zheltonozhskii, and C. Baskin
+End-to-end referring video object segmentation with multimodal transformers .
+In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,
+pp.聽4975鈥?985 .
+Cited by: 搂2.2 .
+Carion et al. (2026)
+N. Carion, L. Gustafson, Y. Hu, S. Debnath, R. Hu, D. Suris Coll-Vinent, C. Ryali, K. V. Alwala, H. Khedr, A. Huang, et al.
+Sam 3: segment anything with concepts .
+In International conference on learning representations ,
+Vol. 2026 , pp.聽138846鈥?38923 .
+Cited by: 搂4.2 .
+Chen et al. (2024a)
+L. Chen, X. Wei, J. Li, X. Dong, P. Zhang, Y. Zang, Z. Chen, H. Duan, B. Lin, Z. Tang, et al.
+Sharegpt4video: improving video understanding and generation with better captions .
+Advances in Neural Information Processing Systems 37 , pp.聽19472鈥?9495 .
+Cited by: 搂2.1 .
+Chen et al. (2024b)
+Z. Chen, J. Wu, W. Wang, W. Su, G. Chen, S. Xing, M. Zhong, Q. Zhang, X. Zhu, L. Lu, et al.
+Internvl: scaling up vision foundation models and aligning for generic visual-linguistic tasks .
+In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition ,
+pp.聽24185鈥?4198 .
+Cited by: 搂2.1 .
+Comanici et al. (2025)
+G. Comanici, E. Bieber, M. Schaekermann, I. Pasupat, N. Sachdeva, I. Dhillon, M. Blistein, O. Ram, D. Zhang, E. Rosen, et al.
+Gemini 2.5: pushing the frontier with advanced reasoning, multimodality, long context, and next generation agentic capabilities .
+arXiv preprint arXiv:2507.06261 .
+Cited by: 搂A.2 ,
+搂A.2 ,
+搂3.1 .
+Dai et al. (2023)
+W. Dai, J. Li, D. Li, A. Tiong, J. Zhao, W. Wang, B. Li, P. N. Fung, and S. Hoi
+Instructblip: towards general-purpose vision-language models with instruction tuning .
+Advances in neural information processing systems 36 , pp.聽49250鈥?9267 .
+Cited by: 搂2.1 .
+Darcet et al. (2024)
+T. Darcet, M. Oquab, J. Mairal, and P. Bojanowski
+Vision transformers need registers .
+In International conference on learning representations ,
+Vol. 2024 , pp.聽2632鈥?652 .
+Cited by: 搂2.3 .
+Deng et al. (2025)
+A. Deng, T. Chen, S. Yu, T. Yang, L. Spencer, Y. Tian, A. S. Mian, M. Bansal, and C. Chen
+Motion-grounded video reasoning: understanding and perceiving motion at pixel level .
+In Proceedings of the Computer Vision and Pattern Recognition Conference ,
+pp.聽8625鈥?636 .
+Cited by: 搂A.1 ,
+搂C.1 ,
+Table 11 ,
+搂3.1 .
+Ding et al. (2023)
+H. Ding, C. Liu, S. He, X. Jiang, and C. C. Loy
+Mevis: a large-scale benchmark for video segmentation with motion expressions .
+In 2023 IEEE/CVF International Conference on Computer Vision (ICCV) ,
+pp.聽2694鈥?703 .
+Cited by: 搂A.1 ,
+Table 11 ,
+搂3.1 ,
+搂4 .
+Gong et al. (2025a)
+S. Gong, L. Zhang, Y. Zhuge, X. Jia, P. Zhang, and H. Lu
+Reinforcing video reasoning segmentation to think before it segments .
+arXiv preprint arXiv:2508.11538 .
+Cited by: 搂1 ,
+搂2.2 ,
+Table 2 .
+Gong et al. (2025b)
+S. Gong, Y. Zhuge, L. Zhang, Z. Yang, P. Zhang, and H. Lu
+The devil is in temporal token: high quality video reasoning segmentation .
+In 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,
+pp.聽29183鈥?9192 .
+Cited by: 搂2.2 ,
+Table 2 .
+Han et al. (2025)
+S. H. Han, J. Hyun, P. Lee, M. Shim, D. Wee, and S. J. Kim
+Decomposed attention fusion in mllms for training-free video reasoning segmentation .
+arXiv preprint arXiv:2510.19592 .
+Cited by: 搂C.1 ,
+搂D.1 ,
+搂1 ,
+搂2.3 ,
+搂3 ,
+搂3.2 ,
+搂4 ,
+Table 2 ,
+Table 2 .
+Hu et al. (2026)
+R. Hu, C. Wang, L. Wei, J. Bai, B. Yu, W. Huang, K. Wang, and Y. Wang
+Attend to evidence: evidence-anchored spatial attention supervision for multimodal rlvr .
+arXiv preprint arXiv:2605.30912 .
+Cited by: 搂2.3 .
+Huang et al. (2024a)
+B. Huang, X. Wang, H. Chen, Z. Song, and W. Zhu
+Vtimellm: empower llm to grasp video moments .
+In 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,
+pp.聽14271鈥?4280 .
+Cited by: 搂2.1 .
+Huang et al. (2024b)
+Q. Huang, X. Dong, P. Zhang, B. Wang, C. He, J. Wang, D. Lin, W. Zhang, and N. Yu
+Opera: alleviating hallucination in multi-modal large language models via over-trust penalty and retrospection-allocation .
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,
+pp.聽13418鈥?3427 .
+Cited by: 搂2.3 .
+Jang et al. (2026)
+J. Jang, E. Yoon, H. S. Yoon, S. Eom, M. A. Hasegawa-Johnson, and C. D. Yoo
+Token-level response-visual attention guidance for multimodal llms knowledge distillation .
+arXiv preprint arXiv:2607.02593 .
+Cited by: 搂1 .
+Jin et al. (2026)
+W. Jin, S. Kim, J. Lee, and S. Kim
+Interrvos: interaction-aware referring video object segmentation .
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,
+pp.聽10367鈥?0376 .
+Cited by: 搂2.2 ,
+搂2.3 ,
+搂3.1 .
+Kang et al. (2025)
+S. Kang, J. Kim, J. Kim, and S. J. Hwang
+Your large vision-language model only needs a few attention heads for visual grounding .
+In Proceedings of the Computer Vision and Pattern Recognition Conference ,
+pp.聽9339鈥?350 .
+Cited by: 搂2.3 ,
+搂3 ,
+Table 2 ,
+Table 2 .
+Kao et al. (2025)
+S. Kao, Y. Tai, and C. Tang
+CoT-rvs: zero-shot chain-of-thought reasoning segmentation for videos .
+arXiv preprint arXiv:2505.18561 .
+Cited by: 搂D.3 ,
+搂1 ,
+搂2.2 ,
+Table 2 .
+Khoreva et al. (2018)
+A. Khoreva, A. Rohrbach, and B. Schiele
+Video object segmentation with language referring expressions .
+In Asian conference on computer vision ,
+pp.聽123鈥?41 .
+Cited by: 搂A.1 ,
+搂3.1 ,
+搂4 .
+Kirillov et al. (2023)
+A. Kirillov, E. Mintun, N. Ravi, H. Mao, C. Rolland, L. Gustafson, T. Xiao, S. Whitehead, A. C. Berg, W. Lo, et al.
+Segment anything .
+In 2023 IEEE/CVF international conference on computer vision (ICCV) ,
+pp.聽3992鈥?003 .
+Cited by: 搂1 .
+Lai et al. (2024)
+X. Lai, Z. Tian, Y. Chen, Y. Li, Y. Yuan, S. Liu, and J. Jia
+Lisa: reasoning segmentation via large language model .
+In 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,
+pp.聽9579鈥?589 .
+Cited by: 搂A.1 ,
+Table 11 ,
+搂2.2 ,
+搂3.1 ,
+Table 2 .
+Li et al. (2024)
+B. Li, Y. Zhang, D. Guo, R. Zhang, F. Li, H. Zhang, K. Zhang, P. Zhang, Y. Li, Z. Liu, et al.
+Llava-onevision: easy visual task transfer .
+arXiv preprint arXiv:2408.03326 .
+Cited by: 搂2.1 .
+Li et al. (2023)
+J. Li, D. Li, S. Savarese, and S. Hoi
+Blip-2: bootstrapping language-image pre-training with frozen image encoders and large language models .
+In International conference on machine learning ,
+pp.聽19730鈥?9742 .
+Cited by: 搂2.1 .
+Li et al. (2026)
+X. Li, Y. Zhu, X. Zeng, Y. Dong, H. Wu, Z. Zhang, Y. Yang, C. Ma, Q. Zhang, Y. Shi, et al.
+VideoChat3: fully open video mllm for efficient and generalist video understanding .
+arXiv preprint arXiv:2607.14935 .
+Cited by: 搂2.1 .
+Li et al. (2025)
+Y. Li, H. Wang, X. Ding, H. Wang, and X. Li
+Token activation map to visually explain multimodal llms .
+In Proceedings of the IEEE/CVF International Conference on Computer Vision ,
+pp.聽48鈥?8 .
+Cited by: 搂1 ,
+搂2.3 ,
+Table 2 .
+Lian et al. (2025)
+L. Lian, Y. Ding, Y. Ge, S. Liu, H. Mao, B. Li, M. Pavone, M. Liu, T. Darrell, A. Yala, et al.
+Describe anything: detailed localized image and video captioning .
+In Proceedings of the IEEE/CVF International Conference on Computer Vision ,
+pp.聽21766鈥?1777 .
+Cited by: 搂2.1 .
+Lin et al. (2024)
+B. Lin, Y. Ye, B. Zhu, J. Cui, M. Ning, P. Jin, and L. Yuan
+Video-llava: learning united visual representation by alignment before projection .
+In Proceedings of the 2024 conference on empirical methods in natural language processing ,
+pp.聽5971鈥?984 .
+Cited by: 搂2.1 .
+Lin et al. (2025)
+L. Lin, X. Yu, Z. Pang, and Y. Wang
+Glus: global-local reasoning unified into a single large language model for video segmentation .
+In 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,
+pp.聽8658鈥?667 .
+Cited by: 搂D.3 ,
+搂2.2 ,
+Table 2 .
+Liu et al. (2024)
+A. Liu, B. Feng, B. Xue, B. Wang, B. Wu, C. Lu, C. Zhao, C. Deng, C. Zhang, C. Ruan, et al.
+Deepseek-v3 technical report .
+arXiv preprint arXiv:2412.19437 .
+Cited by: 搂3 .
+Liu et al. (2023)
+H. Liu, C. Li, Q. Wu, and Y. J. Lee
+Visual instruction tuning .
+Advances in neural information processing systems 36 , pp.聽34892鈥?4916 .
+Cited by: 搂1 ,
+搂2.1 .
+Liu et al. (2025a)
+Y. Liu, Z. Ma, J. Pu, Z. Qi, Y. Wu, Y. Shan, and C. W. Chen
+UniPixel: unified object referring and segmentation for pixel-level visual reasoning .
+arXiv preprint arXiv:2509.18094 .
+Cited by: Table 2 .
+Liu et al. (2025b)
+Y. Liu, B. Peng, Z. Zhong, Z. Yue, F. Lu, B. Yu, and J. Jia
+Seg-zero: reasoning-chain guided segmentation via cognitive reinforcement .
+arXiv preprint arXiv:2503.06520 .
+Cited by: 搂1 ,
+搂2.3 .
+Maaz et al. (2024)
+M. Maaz, H. Rasheed, S. Khan, and F. Khan
+Video-chatgpt: towards detailed video understanding via large vision and language models .
+In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) ,
+pp.聽12585鈥?2602 .
+Cited by: 搂2.1 .
+Meng et al. (2025)
+J. Meng, X. Li, H. Wang, Y. Tan, T. Zhang, L. Kong, Y. Tong, A. Wang, Z. Teng, Y. Wang, et al.
+Open-o3 video: grounded video reasoning with explicit spatio-temporal evidence .
+arXiv preprint arXiv:2510.20579 .
+Cited by: 搂1 ,
+搂2.3 .
+Miao et al. (2023)
+B. Miao, M. Bennamoun, Y. Gao, and A. Mian
+Spectrum-guided multi-granularity referring video object segmentation .
+In 2023 IEEE/CVF International Conference on Computer Vision (ICCV) ,
+pp.聽920鈥?30 .
+Cited by: Table 11 .
+Miao et al. (2024)
+B. Miao, M. Bennamoun, Y. Gao, M. Shah, and A. Mian
+Temporally consistent referring video object segmentation with hybrid memory .
+IEEE Transactions on Circuits and Systems for Video Technology 34 ( 11 ), pp.聽11373鈥?1385 .
+Cited by: Table 11 .
+OpenAI (2025)
+OpenAI
+OpenAI-o3 .
+Note: https://openai.com/index/introducing-o3-and-o4-mini/
+Cited by: 搂1 ,
+搂2.3 .
+Qin et al. (2025)
+Y. Qin, B. Wei, J. Ge, K. Kallidromitis, S. Fu, T. Darrell, and X. Wang
+Chain-of-visual-thought: teaching vlms to see and think better with continuous visual tokens .
+arXiv preprint arXiv:2511.19418 .
+Cited by: 搂1 ,
+搂2.3 .
+Ravi et al. (2025)
+N. Ravi, V. Gabeur, Y. Hu, R. Hu, C. Ryali, T. Ma, H. Khedr, R. R盲dle, C. Rolland, L. Gustafson, et al.
+Sam 2: segment anything in images and videos .
+In International Conference on Learning Representations ,
+Vol. 2025 , pp.聽28085鈥?8128 .
+Cited by: 搂1 ,
+搂1 ,
+搂4 .
+Ren et al. (2024a)
+S. Ren, L. Yao, S. Li, X. Sun, and L. Hou
+Timechat: a time-sensitive multimodal large language model for long video understanding .
+In 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,
+pp.聽14313鈥?4323 .
+Cited by: 搂2.1 .
+Ren et al. (2024b)
+Z. Ren, Z. Huang, Y. Wei, Y. Zhao, D. Fu, J. Feng, and X. Jin
+Pixellm: pixel reasoning with large multimodal model .
+In 2024 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,
+pp.聽26364鈥?6373 .
+Cited by: Table 11 .
+Seo et al. (2020)
+S. Seo, J. Lee, and B. Han
+Urvos: unified referring video object segmentation network with a large-scale benchmark .
+In European conference on computer vision ,
+pp.聽208鈥?23 .
+Cited by: 搂A.1 ,
+搂2.2 ,
+搂3.1 ,
+搂4 .
+Su et al. (2025)
+Y. Su, H. Zhang, S. Li, N. Liu, J. Liao, J. Pan, Y. Liu, X. Xing, C. Sun, C. Li, N. F. Chen, S. Yan, X. Yang, and X. Xu
+Patch-as-decodable-token: towards unified multi-modal vision tasks in mllms .
+External Links: 2510.01954 ,
+Link
+Cited by: 搂1 ,
+搂2.3 .
+Vaswani et al. (2017)
+A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, 艁. Kaiser, and I. Polosukhin
+Attention is all you need .
+Advances in neural information processing systems 30 .
+Cited by: 搂1 ,
+搂2.3 .
+Wang et al. (2025a)
+H. Wang, Q. Chen, C. Yan, J. Cai, X. Jiang, Y. Hu, W. Xie, and S. Gavves
+Object-centric video question answering with visual grounding and referring .
+arXiv preprint arXiv:2507.19599 .
+Cited by: Table 2 .
+Wang et al. (2025b)
+H. Wang, X. Li, Z. Huang, A. Wang, J. Wang, T. Zhang, J. Zheng, S. Bai, Z. Kang, J. Feng, et al.
+Traceable evidence enhanced visual grounded reasoning: evaluation and methodology .
+arXiv preprint arXiv:2507.07999 .
+Cited by: 搂1 ,
+搂2.3 .
+Wang et al. (2025c)
+H. Wang, Y. Wang, T. Zhang, Y. Zhou, Y. Li, J. Wang, J. Zheng, Y. Tian, J. Meng, Z. Huang, et al.
+Grasp any region: towards precise, contextual pixel understanding for multimodal llms .
+arXiv preprint arXiv:2510.18876 .
+Cited by: 搂A.2 ,
+搂3.1 .
+Wang et al. (2024)
+P. Wang, S. Bai, S. Tan, S. Wang, Z. Fan, J. Bai, K. Chen, X. Liu, J. Wang, W. Ge, et al.
+Qwen2-vl: enhancing vision-language model鈥檚 perception of the world at any resolution .
+arXiv preprint arXiv:2409.12191 .
+Cited by: 搂2.1 .
+Wei et al. (2025)
+C. Wei, Y. Zhong, H. Tan, Y. Zeng, Y. Liu, H. Wang, and Y. Yang
+Instructseg: unifying instructed visual segmentation with multi-modal large language models .
+In Proceedings of the IEEE/CVF International Conference on Computer Vision ,
+pp.聽20193鈥?0203 .
+Cited by: Table 2 .
+Wu et al. (2022)
+J. Wu, Y. Jiang, P. Sun, Z. Yuan, and P. Luo
+Language as queries for referring video object segmentation .
+In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,
+pp.聽4964鈥?974 .
+Cited by: Table 11 ,
+搂2.2 .
+Wu et al. (2025)
+S. Wu, S. Jin, W. Zhang, L. Xu, W. Liu, W. Li, and C. C. Loy
+F-lmm: grounding frozen large multimodal models .
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition ,
+pp.聽24710鈥?4721 .
+Cited by: 搂2.3 .
+Xu et al. (2024)
+L. Xu, Y. Zhao, D. Zhou, Z. Lin, S. K. Ng, and J. Feng
+Pllava: parameter-free llava extension from images to videos for video dense captioning .
+arXiv preprint arXiv:2404.16994 .
+Cited by: 搂2.1 .
+Yan et al. (2024)
+C. Yan, H. Wang, S. Yan, X. Jiang, Y. Hu, G. Kang, W. Xie, and E. Gavves
+Visa: reasoning video object segmentation via large language models .
+In European Conference on Computer Vision ,
+pp.聽98鈥?15 .
+Cited by: 搂A.1 ,
+Table 11 ,
+搂2.2 ,
+搂3.1 ,
+搂4 ,
+Table 2 .
+Yang et al. (2025)
+J. Yang, S. Yang, A. W. Gupta, R. Han, L. Fei-Fei, and S. Xie
+Thinking in space: how multimodal large language models see, remember, and recall spaces .
+In 2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) ,
+pp.聽10632鈥?0643 .
+Cited by: 搂2.1 .
+Yuan et al. (2025a)
+H. Yuan, X. Li, T. Zhang, Y. Sun, Z. Huang, S. Xu, S. Ji, Y. Tong, L. Qi, J. Feng, and M. Yang
+Sa2VA: marrying sam2 with llava for dense grounded understanding of images and videos .
+arXiv preprint arXiv:2501.04001 .
+Cited by: 搂2.2 .
+Yuan et al. (2025b)
+H. Yuan, Y. Sun, Y. Li, T. Zhang, X. Deng, H. Ding, L. Qi, A. Wang, X. Li, and M. Yang
+Visual reasoning tracer: object-level grounded reasoning benchmark .
+arXiv preprint arXiv:2512.05091 .
+Cited by: 搂2.3 .
+Yuan et al. (2025c)
+Y. Yuan, H. Zhang, W. Li, Z. Cheng, B. Zhang, L. Li, X. Li, D. Zhao, W. Zhang, Y. Zhuang, et al.
+Videorefer suite: advancing spatial-temporal object understanding with video llm .
+In Proceedings of the Computer Vision and Pattern Recognition Conference ,
+pp.聽18970鈥?8980 .
+Cited by: 搂2.1 .
+Zhang et al. (2023)
+H. Zhang, X. Li, and L. Bing
+Video-llama: an instruction-tuned audio-visual language model for video understanding .
+In Proceedings of the 2023 conference on empirical methods in natural language processing: system demonstrations ,
+pp.聽543鈥?53 .
+Cited by: 搂2.1 .
+Zhang et al. (2025)
+J. Zhang, Y. Guo, R. A. Potamias, J. Deng, H. Xu, and C. Ma
+Vtimecot: thinking by drawing for video temporal grounding and reasoning .
+In 2025 IEEE/CVF International Conference on Computer Vision (ICCV) ,
+pp.聽24203鈥?4213 .
+Cited by: 搂1 .
+Zheng et al. (2024a)
+P. Zheng, D. Gao, D. Fan, L. Liu, J. Laaksonen, W. Ouyang, and N. Sebe
+Bilateral reference for high-resolution dichotomous image segmentation .
+CAAI Artificial Intelligence Research 3 , pp.聽9150038 .
+Cited by: 搂3.1 .
+Zheng et al. (2024b)
+Y. Zheng, R. Zhang, J. Zhang, Y. Ye, and Z. Luo
+Llamafactory: unified efficient finetuning of 100+ language models .
+In Proceedings of the 62nd annual meeting of the association for computational linguistics (volume 3: system demonstrations) ,
+pp.聽400鈥?10 .
+Cited by: 搂4 .
+Zhong et al. (2026)
+H. Zhong, M. Zhu, Z. Du, Z. Huang, C. Zhao, M. Liu, W. Wang, H. Chen, and C. Shen
+Omni-r1: reinforcement learning for omnimodal reasoning via two-system collaboration .
+Advances in Neural Information Processing Systems 38 , pp.聽45266鈥?5297 .
+Cited by: 搂1 ,
+搂2.2 .
+Zhou et al. (2026)
+Y. Zhou, T. Zhang, D. Gong, Y. Wu, Y. Tian, H. Wang, H. Yuan, J. Wang, L. Qi, H. Fei, et al.
+SAMTok: representing any mask with two words .
+arXiv preprint arXiv:2601.16093 .
+Cited by: 搂1 .
+Zhu et al. (2024)
+D. Zhu, X. Shen, X. Li, M. Elhoseiny, et al.
+Minigpt-4: enhancing vision-language understanding with advanced large language models .
+In International Conference on Learning Representations ,
+Vol. 2024 , pp.聽18378鈥?8394 .
+Cited by: 搂2.1 .
+Appendix Overview
+This appendix provides supplementary details of ReVEAL.
+eVEAL-47K Training Dataset 鈥?span id="Ax1.p2.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> A 鈥?/span>
+ataset Overview 鈥?span id="Ax1.p3.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> A.1 鈥?/span>
+nnotation Prompts 鈥?span id="Ax1.p4.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> A.2 鈥?/span>
+ore Details of ReVEAL 鈥?span id="Ax1.p5.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> B 鈥?/span>
+ynamic Attention Layer Router 鈥?span id="Ax1.p6.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> B.1 鈥?/span>
+eVEAL System Prompt 鈥?span id="Ax1.p7.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> B.2 鈥?/span>
+raining and Inference Settings 鈥?span id="Ax1.p8.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> B.3 鈥?/span>
+dditional Experimental Analysis 鈥?span id="Ax1.p9.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> C 鈥?/span>
+dditional Quantitative Results 鈥?span id="Ax1.p10.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> C.1 鈥?/span>
+dditional Ablation Studies 鈥?span id="Ax1.p11.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> C.2 鈥?/span>
+ore Visualizations 鈥?span id="Ax1.p12.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> D 鈥?/span>
+ore Comparisons with Other Methods 鈥?span id="Ax1.p13.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> D.1 鈥?/span>
+ore Role-Token Attention Map Visualizations 鈥?span id="Ax1.p14.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> D.2 鈥?/span>
+ailure Case Analysis and Limitations 鈥?span id="Ax1.p15.1.2.1.1" class="ltx_text ltx_markedasmath">. 鈥?/span> D.3 鈥?/span>
+Appendix A ReVEAL-47K Training Dataset
+A.1 Dataset Overview
+Figure 6: ReVEAL-47K Composition.
+To equip the model with dynamic role-aware VET reasoning and reliable latent visual grounding, we construct ReVEAL-47K training dataset, comprising 47K VET-augmented ReVOS CoT traces paired with target and background masks for attention grounding.
+ReVEAL-47K is constructed from the training splits of five public RVOS and ReVOS datasets, including MeViS聽 ( Ding et al., 2023 ) , ReVOS聽 ( Yan et al., 2024 ) , GroundMoRe聽 ( Deng et al., 2025 ) , Ref-DAVIS聽 ( Khoreva et al., 2018 ) , and Ref-YouTube-VOS聽 ( Seo et al., 2020 ) , together with the image reasoning segmentation dataset ReasonSeg聽 ( Lai et al., 2024 ) , as shown in Fig.聽 6 . We use six frames as the model input for all samples. For ReasonSeg, each sample is included twice, with its single image repeated across six frames and treated as a static video.
+The resulting dataset contains 47K VET-augmented CoT annotations. Each trace contains exactly one <OBJ> token for target evidence, even when the query refers to multiple target objects, as its attention map can cover multiple target regions, while suppressive VETs are introduced only when needed. Specifically, <BG> appears at most once to provide background evidence, whereas multiple <NEG> tokens can be used to distinguish different distractors. On average, each trace contains 1.00 <OBJ> , 0.42 <BG> , and 0.86 <NEG> tokens.
+A.2 Annotation Prompts
+Stage 1: Mask-conditioned Target Description.
+We use GAR聽 ( Wang et al., 2025c ) with the official inference setup to generate a mask-conditioned caption of the target object(s).
+Stage 2: Original Video CoT Generation.
+This prompt is used for Gemini2.5 Pro聽 ( Comanici et al., 2025 ) to produce a naive CoT for the ReVOS query based on the video content:
+Original Video CoT Generation Prompt
+You are annotating video object question answering data.
+Inputs
+A set of video frames.
+A referring query.
+A detailed description of the target object(s).
+Task
+Write one concise reasoning paragraph explaining how the target described
+by the query can be identified and localized based on visual evidence in the
+video. Focus on observable cues such as appearance, position, movement,
+persistence across frames, and spatial relations to visible scene elements.
+If the target is trivially identifiable because it is unique, salient, and has
+no competing objects, one sentence naming the target is enough. Otherwise,
+include only the minimum cues needed to remove ambiguity, choosing from:
+background regions to ignore, concrete distractors that could be confused with
+the target, visible reference objects, temporal order, motion trajectory,
+persistence, or key-frame changes. Use only cues that are actually visible and
+helpful for this case. Do not pad, do not list absent elements, and do not
+invent distractors or references.
+Constraints
+鈥?/span>
+The target must follow the referring query exactly; do not re-interpret
+or substitute it.
+鈥?/span>
+Keep the paragraph concise: 2鈥? sentences, information-dense.
+鈥?/span>
+Output plain text only. No JSON, no coordinates, no bounding boxes.
+Stage 3: VET-Augmented Reasoning Trace Construction.
+Given the naive CoT traces, we prompt Gemini2.5 Pro聽 ( Comanici et al., 2025 ) to refine the reasoning by identifying key objects, background, and distractors, and inserting the corresponding role-specific VETs into the trace:
+VET-Augmented Reasoning Trace Construction Prompt
+You are rewriting reasoning traces for video object discovery annotations.
+Inputs
+A reasoning query.
+An existing reasoning paragraph of the video.
+Task
+Rewrite the reasoning paragraph into one concise, natural visual reasoning trace
+that answers the reasoning query. Use the existing reasoning paragraph as
+evidence, but make the rewritten output focus on identifying and localizing the
+object(s) asked for by the query in the video. Do not merely polish the original
+text or insert tokens mechanically. The reasoning should proceed from visible
+video cues to the final answer: first explain which visual evidence supports the
+queried object(s), then conclude with the target object(s) marked by <OBJ> .
+Visual Evidence Tokens
+Insert Visual Evidence Tokens immediately after the phrase they label:
+鈥?/span>
+<BG> : background scene regions to ignore, not foreground objects.
+鈥?/span>
+<NEG> : concrete non-target foreground objects that could be
+confused with the target.
+鈥?/span>
+<OBJ> : the final target object(s) to segment.
+Reasoning Order
+Prefer this order when applicable:
+Interpret the query by focusing on the object(s) it asks to segment.
+Use observable video cues to identify and localize that object(s), such as
+appearance, position, persistence across frames, motion, relation to stable
+scene anchors, or temporal changes.
+Add <BG> only for background scene regions that help exclude
+irrelevant areas.
+Add <NEG> only for visible non-target foreground objects that
+could plausibly be confused with the queried object.
+End with the target that answers the query, marked once with
+<OBJ> .
+The paragraph should provide a video-grounded response to the query, rather than a static image description or a list of labels.
+Token Placement Rule
+Each Visual Evidence Token must appear immediately after the object or region phrase it
+labels. Correct: the driveway <BG> , the soldier <NEG> , the man
+on the left <OBJ> .
+Editing Rules
+鈥?/span>
+The rewritten paragraph must answer the reasoning query, not just
+restate the existing paragraph.
+鈥?/span>
+The object(s) marked with <OBJ> must be the final answer to the
+query.
+鈥?/span>
+Any reasoning before <OBJ> should explain why that object(s),
+rather than another visible object(s) or region, satisfies the query.
+鈥?/span>
+Do not mark an object(s) with <OBJ> only because it is visually
+salient; it must be the object(s) asked for by the query.
+鈥?/span>
+Do not add new visual objects, distractors, references, background regions, actions, or attributes unless they are already stated or clearly
+implied by the reasoning paragraph.
+鈥?/span>
+If the existing paragraph contains irrelevant details that do not help
+answer the query, omit them.
+鈥?/span>
+Improve the reasoning so it sounds like it is derived from video
+evidence, not like a labeling checklist.
+鈥?/span>
+Do not use meta-descriptions such as 鈥渋nitial context is established,鈥?鈥渢he label matches,鈥?or 鈥渢his indicates the target.鈥?/span>
+鈥?/span>
+<OBJ> is mandatory and must appear exactly once, attached to the
+final target.
+鈥?/span>
+<BG> is optional and may appear at most once. <NEG> is
+optional and may appear multiple times, once for each distinct distractor.
+Use them only when useful and visually grounded.
+鈥?/span>
+Use <BG> only for scene or background regions, never foreground
+objects.
+鈥?/span>
+Use <NEG> only for concrete non-target foreground objects that
+could be mistaken for the target.
+鈥?/span>
+Do not attach tokens to verbs, actions, relations, attributes, or
+abstract descriptions.
+鈥?/span>
+Keep the output concise, fluent, and grounded in the video.
+鈥?/span>
+Output only the rewritten reasoning paragraph. No JSON, no bullets, no
+headings, no explanation.
+Stage 4: Quality control.
+Here is the prompt we use to filter invalid CoT annotations:
+Quality Control Prompt
+You are validating video object reasoning annotations.
+Inputs
+Six uniformly sampled video frames.
+A referring query.
+A target description.
+A candidate reasoning trace containing Visual Evidence Tokens.
+Visual Evidence Tokens
+鈥?/span>
+<OBJ> : the final target object.
+鈥?/span>
+<NEG> : visible distractors or non-target objects.
+鈥?/span>
+<BG> : safe background or regions to ignore.
+Task
+Determine whether the reasoning trace correctly identifies and localizes the target object(s). Use the referring query as the primary criterion and the target description only as supplementary guidance. Base the judgment solely on the visible frames.
+Answer yes only if
+鈥?/span>
+the target (s) is visible in the six frames;
+鈥?/span>
+the trace follows the query and matches the target description;
+鈥?/span>
+the trace marks the correct final target (s);
+鈥?/span>
+any <BG> or <NEG> Visual Evidence Tokens are visually grounded and
+correctly used;
+鈥?/span>
+the reasoning is clear, specific, and free of substantial irrelevant or
+redundant content.
+Answer no if
+鈥?/span>
+the target (s) is not visible in the six frames;
+鈥?/span>
+the trace targets the wrong object or conflicts with the query;
+鈥?/span>
+the trace conflicts with the target description;
+鈥?/span>
+the trace contradicts the frames or invents key evidence;
+鈥?/span>
+the trace is too ambiguous to localize the target;
+鈥?/span>
+the trace contains substantial irrelevant, redundant, or generic content.
+Constraints
+Output exactly one lowercase word: yes or no.
+Appendix B More Details of ReVEAL
+B.1 Dynamic Attention Layer Router
+Since target identification is central to ReVOS, DALR uses <OBJ> attention as the routing cue to select layers that provide informative target evidence. As these layers vary across inputs, DALR adaptively selects and weights candidate layers for each sample. The same layer selection and routing weights are applied to all VET roles, ensuring efficient aggregation of role-specific attention maps.
+As detailed in Algorithm聽 1 , DALR employs noisy top- k k routing during training to encourage exploration and deterministic routing at inference. We use L c = 14 L_{c}=14 candidate layers for Qwen2.5VL-7B and L c = 18 L_{c}=18 for Qwen3VL-8B, with a feature dimension of 256 256 and k = 6 k=6 by default.
+Algorithm 1 Dynamic Attention Layer Router
+<OBJ> attention maps
+a <OBJ> , 1 a^{\texttt{<OBJ>},1} from candidate layers 鈩?/mi> c \mathcal{L}_{c} ,
+feature dimension D D , and selection size k k
+饾悧 鈫?/mo> ClampMin 鈦?/mo> ( Flatten 鈦?/mo> ( a <OBJ> , 1 ) , 0 ) \mathbf{X}\leftarrow\operatorname{ClampMin}\bigl(\operatorname{Flatten}(a^{\texttt{<OBJ>},1}),0\bigr)
+饾悧 鈫?/mo> Normalize 鈦?/mo> ( 饾悧 ) \mathbf{X}\leftarrow\operatorname{Normalize}(\mathbf{X})
+饾悈 鈫?/mo> AdaptiveAvgPool1D 鈦?/mo> ( 饾悧 , D ) \mathbf{F}\leftarrow\operatorname{AdaptiveAvgPool1D}(\mathbf{X},D)
+饾悈 鈫?/mo> Normalize 鈦?/mo> ( 饾悈 ) \mathbf{F}\leftarrow\operatorname{Normalize}(\mathbf{F})
+饾悈 鈫?/mo> StopGradient 鈦?/mo> ( 饾悈 ) \mathbf{F}\leftarrow\operatorname{StopGradient}(\mathbf{F})
+饾惉 鈫?/mo> g score 鈥?/mo> ( 饾悈 ) \mathbf{s}\leftarrow g_{\mathrm{score}}(\mathbf{F})
+if training then
+鈥冣€?math id="alg1.l9.m1" class="ltx_Math" alttext="\bm{\sigma}\leftarrow\operatorname{Softplus}\bigl(g_{\mathrm{noise}}(\mathbf{F})\bigr)" display="inline" intent=":literal"> 饾潏 鈫?/mo> Softplus 鈦?/mo> ( g noise 鈥?/mo> ( 饾悈 ) ) \bm{\sigma}\leftarrow\operatorname{Softplus}\bigl(g_{\mathrm{noise}}(\mathbf{F})\bigr)
+10:
+鈥冣€?math id="alg1.l10.m1" class="ltx_Math" alttext="\tilde{\mathbf{s}}\leftarrow\mathbf{s}+\bm{\epsilon}\odot\bm{\sigma},\quad\bm{\epsilon}\sim\mathcal{N}(\mathbf{0},\mathbf{I})" display="inline" intent=":literal"> 饾惉 ~ 鈫?/mo> 饾惉 + 系 鈯?/mo> 饾潏 , 系 鈭?/mo> 饾挬 鈦?/mo> ( 饾煄 , 饾悎 ) \tilde{\mathbf{s}}\leftarrow\mathbf{s}+\bm{\epsilon}\odot\bm{\sigma},\quad\bm{\epsilon}\sim\mathcal{N}(\mathbf{0},\mathbf{I})
+11:
+else
+12:
+鈥冣€?math id="alg1.l12.m1" class="ltx_Math" alttext="\tilde{\mathbf{s}}\leftarrow\mathbf{s}" display="inline" intent=":literal"> 饾惉 ~ 鈫?/mo> 饾惉 \tilde{\mathbf{s}}\leftarrow\mathbf{s}
+13:
+end if
+14:
+饾挳 鈫?/mo> TopK l 鈭?/mo> 鈩?/mi> c 鈦?/mo> ( s ~ l , k ) \mathcal{S}\leftarrow\operatorname{TopK}_{l\in\mathcal{L}_{c}}(\tilde{s}_{l},k)
+15:
+w l 鈫?/mo> exp 鈦?/mo> ( s ~ l ) 鈭?/mo> m 鈭?/mo> 饾挳 exp 鈦?/mo> ( s ~ m ) , 鈭€ l 鈭?/mo> 饾挳 w_{l}\leftarrow\displaystyle\frac{\exp(\tilde{s}_{l})}{\sum_{m\in\mathcal{S}}\exp(\tilde{s}_{m})},\quad\forall l\in\mathcal{S}
+16:
+return selected layers 饾挳 \mathcal{S} and routing weights
+{ w l } l 鈭?/mo> 饾挳 \{w_{l}\}_{l\in\mathcal{S}}
+B.2 ReVEAL System Prompt
+We use the following system prompt during both training and inference:
+ReVEAL System Prompt
+You are a video object reasoner.
+Task
+Given a set of video frames and a referring query, your job is to answer the
+query by locating the target object(s) in the video. Output a reasoning paragraph
+that answers the query and contains the following three special tokens.
+Visual Evidence Tokens
+鈥?/span>
+<BG> : background regions to ignore, not foreground objects.
+鈥?/span>
+<NEG> : distractor objects that look similar to the target.
+鈥?/span>
+<OBJ> : the final target to segment.
+Output
+<BG> is optional and may appear at most once. <NEG> is optional
+and may appear multiple times, once for each distinct distractor; these tokens
+may appear in any order. End with a sentence that directly answers the query and names the target with
+<OBJ> . Output only the paragraph: no lists, coordinates, masks, or JSON.
+B.3 Training and Inference Settings
+Table聽 10 and 聽 10 provide key hyperparameters in training and evaluating ReVEAL-Qwen3VL-8B.
+Table 8: Training settings.
+Hyperparameter
+Value
+Random Seed
+Trainable Modules
+MLLM, DALR
+Optimizer
+AdamW
+Epoch
+Learning Rate
+2 脳 10 鈭?/mo> 5 2\times 10^{-5}
+Weight Decay
+0.05 0.05
+LR Schedule
+Cosine
+Global Batch Size
+Frame Max Pixels
+336 脳 32 脳 32 336\times 32\times 32
+Precision
+bfloat16
+DALR Top- k k
+CAGL Weight 位 CAGL \lambda_{\mathrm{CAGL}}
+0.2
+CAGL-R Weight 位 rep \lambda_{\mathrm{rep}}
+0.1
+Table 9: Inference settings.
+Hyperparameter
+Value
+<BG> Sup Weight 伪 <BG> \alpha_{\texttt{<BG>}}
+0.1
+<NEG> Sup Weight 伪 <NEG> \alpha_{\texttt{<NEG>}}
+1.0
+Max Point Prompts
+Attention Threshold 蟿 pq \tau_{\mathrm{pq}}
+0.8
+NMS IoU Threshold 蟿 nms \tau_{\mathrm{nms}}
+0.7
+Tracklet-consistency Threshold 蟿 trk \tau_{\mathrm{trk}}
+0.8
+Table 10:
+Per-query MLLM inference time on Ref-DAVIS using the same Qwen2.5-VL-7B.
+Method
+MLLM calls
+Avg. time (s)
+DecAF
+23.5
+ReVEAL (Ours)
+5.8聽( 4.1 脳 4.1\times )
+Appendix C Additional Experimental Analysis
+By default, results are reported with ReVEAL-Qwen3VL-8B and the
+饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} metric.
+C.1 Additional Quantitative Results
+Inference Efficiency.
+We compare the efficiency of MLLM-side attention production of ReVEAL with the baseline DecAF聽 ( Han et al., 2025 ) on Ref-DAVIS using the same Qwen2.5VL-7B. As shown in Table聽 10 , ReVEAL requires only one MLLM response per query, compared with 35 for DecAF, and achieves over 4 脳 4\times faster inference.
+Measurement is conducted on an NVIDIA H800 GPU.
+Motion-grounded Video Reasoning Performance.
+GroundMoRe聽 ( Deng et al., 2025 ) is a challenging benchmark that requires joint spatio-temporal reasoning to understand object motions and interactions from causal, sequential, counterfactual, and descriptive perspectives. The results in Table聽 11 show that ReVEAL achieves an overall 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} result of 37.1%, outperforming MORA (27.2%) by 9.9%. Notably, ReVEAL delivers substantial gains on both Causal and Descriptive questions, improving the scores from 27.4% to 37.7% and from 29.6% to 44.8%, respectively.
+These gains suggest that our thinking-with-video paradigm facilitates causal reasoning, while attention-derived latent evidence provides a video-wide perspective for tracking moving targets more accurately.
+Table 11: Comparison on GroundMoRe.
+Method
+Overall
+Causal
+Sequential
+Counterfactual
+Descriptive
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+饾挜 \mathcal{J}
+鈩?/mi> \mathcal{F}
+None-MLLM RVOS Methods
+ReferFormer聽 ( Wu et al., 2022 )
+12.7
+11.2
+14.3
+12.7
+11.0
+14.4
+10.7
+9.4
+12.1
+12.4
+11.1
+13.6
+15.2
+13.3
+17.0
+SgMg聽 ( Miao et al., 2023 )
+17.5
+15.8
+19.2
+18.9
+17.0
+20.9
+15.5
+14.0
+17.0
+16.4
+15.2
+17.5
+18.8
+16.7
+20.9
+HTR聽 ( Miao et al., 2024 )
+14.5
+12.7
+16.2
+15.7
+13.8
+17.5
+12.5
+10.8
+14.1
+13.5
+12.2
+14.9
+15.9
+13.8
+18.1
+LMPM聽 ( Ding et al., 2023 )
+13.3
+12.7
+14.0
+13.7
+13.1
+14.3
+11.3
+10.6
+12.0
+13.2
+12.6
+13.7
+14.3
+13.6
+15.1
+Image Reasoning Segmentation Methods
+LISA聽 ( Lai et al., 2024 )
+6.1
+4.9
+7.3
+5.5
+4.4
+6.7
+5.2
+4.1
+6.3
+5.9
+4.8
+7.0
+7.6
+6.1
+9.0
+PixelLM-7B聽 ( Ren et al., 2024b )
+10.0
+9.9
+10.0
+9.5
+9.4
+9.7
+9.2
+9.2
+9.3
+9.8
+9.8
+9.9
+10.9
+11.0
+10.9
+MLLM-Based ReVOS Methods
+VISA-7B聽 ( Yan et al., 2024 )
+5.3
+4.7
+5.9
+6.1
+5.5
+6.6
+4.5
+3.8
+5.2
+5.1
+4.3
+5.9
+5.4
+5.0
+5.8
+MORA聽 ( Deng et al., 2025 )
+27.2
+27.4
+26.9
+27.4
+26.9
+28.0
+26.1
+27.2
+24.9
+25.6
+25.3
+25.9
+29.6
+30.2
+28.9
+ReVEAL (Ours)
+37.1
+35.8
+38.4
+37.7
+36.4
+39.1
+34.0
+32.7
+35.3
+31.5
+30.3
+32.7
+44.8
+43.3
+46.2
+C.2 Additional Ablation Studies
+Sensitivity to the CAGL Weights.
+Table聽 13 evaluates the sensitivity of CAGL to its loss weights. Overall, ReVEAL maintains relatively stable performance across different weight configurations, indicating robustness to these hyperparameters. We adopt 位 CAGL = 0.2 \lambda_{\mathrm{CAGL}}=0.2 and 位 rep = 0.1 \lambda_{\mathrm{rep}}=0.1 , which achieves the best performance on both benchmarks.
+Figure 7: Layer selection distribution of DALR in ReVEAL-Qwen3VL-8B on Ref-DAVIS.
+VET Fusion Strategies on Qwen2.5VL-7B.
+Table聽 13 extends the VET fusion ablation to Qwen2.5VL-7B. Unlike Qwen3VL-8B, this backbone benefits most from background suppression, which improves attention-derived and SAM2 mask 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} by 4.6% and 1.9% on ReasonVOS, respectively. Fusing all three VET types achieves the best overall performance on both benchmarks, supporting the effectiveness of our role design and fusion strategy across MLLM backbones.
+Table 12:
+位 CAGL \lambda_{\mathrm{CAGL}} and 位 rep \lambda_{\mathrm{rep}} ablation.
+位 CAGL \lambda_{\mathrm{CAGL}}
+位 rep \lambda_{\mathrm{rep}}
+SAM2 饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+Ref-D
+ReasV
+0.1
+0.1
+79.4
+62.5
+0.2
+0.1
+80.7
+66.1
+0.3
+0.1
+79.0
+65.9
+0.2
+0.05
+76.8
+65.3
+0.2
+0.15
+80.3
+66.0
+Table 13: Inference-time ablation of different VET combination strategies using
+ReVEAL-Qwen2.5VL-7B. ReVEAL uses all three types of VETs during evaluation.
+MLLM
+<OBJ>
+<BG>
+<NEG>
+Attn Mask
+SAM2 Mask
+Ref-D
+ReasV
+Ref-D
+ReasV
+Qwen2.5-VL-7B
+鉁?/td>
+鈥?/td>
+鈥?/td>
+24.8
+17.2
+77.3
+62.2
+鉁?/td>
+鈥?/td>
+鉁?/td>
+25.6
+17.8
+77.0
+63.5
+鉁?/td>
+鉁?/td>
+鈥?/td>
+28.6
+21.8
+77.4
+64.1
+鉁?/span>
+鉁?/span>
+鉁?/span>
+29.4
+22.1
+77.7
+65.1
+DALR Top- k k Ablation.
+We evaluate DALR with different top- k k settings, each used during both training and inference. As shown in Table聽 15 , selecting k = 6 k=6 layers achieves the best overall performance across the two benchmarks. Selecting more layers provides no consistent gains and may introduce additional noise into the grounding evidence.
+DALR Selection Distribution.
+Figure聽 7 shows DALR鈥檚 layer selection distribution on Ref-DAVIS with k = 6 k=6 . The selected layer combinations vary across inputs, indicating input-dependent selection rather than reliance on a fixed subset.
+Sensitivity to the Background Suppression Weight.
+Figure聽 8 analyzes the effect of the background suppression weight 伪 <BG> \alpha_{\texttt{<BG>}} on attention-derived and SAM2 mask quality. Since <BG> attention often covers broad non- foreground regions, it helps suppress diffuse or spurious object attention. The required suppression strength varies across backbones due to differences in their object attention patterns. ReVEAL-Qwen3VL-8B and ReVEAL-Qwen2.5VL-7B achieve the best SAM2 performance at 伪 <BG> = 0.1 \alpha_{\texttt{<BG>}}=0.1 and 0.5 0.5 , respectively. While stronger suppression generally improves attention-derived masks, overly large weights can also remove useful target evidence and degrade final segmentation.
+Figure 8: Effect of background suppression weight 伪 <BG> \alpha_{\texttt{<BG>}} across two backbones.
+Number of Sampled Point Prompts.
+Table聽 15 studies the maximum number of points sampled from the fused attention map as visual prompts for SAM2 at inference time. Across all three benchmarks, increasing the number of sampled points yields no consistent performance gains. The default setting provides the best overall trade-off between mask quality and prompt efficiency.
+Table 14: DALR top- k k ablation.
+Table 15: Maximum points ablation.
+Router top- k k
+SAM2 饾挜 \mathcal{J} & 鈩?/mi> \mathcal{F}
+Ref-D
+ReasV
+k = 4 k=4
+78.4
+65.9
+饾悿 = 饾煍 \mathbf{k=6}
+80.7
+66.1
+k = 8 k=8
+79.5
+64.7
+k = 10 k=10
+80.1
+64.2
+k = 12 k=12
+79.7
+66.6
+Max Points
+Ref-D
+ReasV
+Ref-YT
+81.0
+65.9
+71.3
+80.7
+66.1
+71.3
+80.6
+66.0
+71.3
+80.6
+66.1
+71.3
+Appendix D More Visualizations
+This section provides additional qualitative results of ReVEAL, including comparisons with other methods, more role-specific visualizations, and failure cases.
+D.1 More Comparisons with Other Methods
+Figure聽 9 compares a representative case from ReasonVOS between ReVEAL and the Without-CoT paradigm.
+In this example, ReVEAL improves attention-mask 饾挜 & 鈩?/mi> \mathcal{J}\&\mathcal{F} by only 1.7% over Without-CoT, yet its VET attention consistently favors the true target despite some hallucinated responses, whereas Without-CoT favors a visually similar distractor. Attention-mask evaluation reflects the spatiotemporal coverage of regions retained after thresholding, whereas SAM2 uses point prompts sampled from high-confidence attention locations. A higher attention-mask score does not necessarily indicate more confident attention peaks on the target. Stronger attention peaks on the true target may therefore yield more reliable point prompts, helping explain the larger gain in SAM2 segmentation despite the modest improvement in attention-mask quality.
+Figure 9: Qualitative comparison between ReVEAL and the Without-CoT paradigm
+on ReasonVOS.
+Figure聽 10 presents additional qualitative comparisons of the fused attention maps produced by ReVEAL and DecAF聽 ( Han et al., 2025 ) . In dynamic scenes requiring target tracking across frames, ReVEAL maintains consistent and clear attention on the target, whereas DecAF tends to produce spurious activations and lose focus on the target in some cases.
+Figure 10: Additional qualitative comparisons between ReVEAL and
+DecAF.
+D.2 More Role-Token Attention Map Visualizations
+Figure聽 11 , Figure聽 12 , and Figure聽 13 provide additional CoT responses and attention maps for the role-specific VETs, following Fig.聽聽 5 .
+ReVEAL dynamically uses suppressive VETs ( <BG> and <NEG> ) according to the reasoning content, with their presence and number varying across examples. The CoT reasoning itself establishes semantic associations between visual entities and their corresponding VETs, enabling individual VETs to attend to relevant regions to some extent. This lightweight association can reduce the reliance on precise region-level supervision for every <NEG> occurrence, which would otherwise incur additional annotation cost. As shown in Figure聽 12 and 13 , different <NEG> occurrences tend to highlight distinct distractor regions.
+Figure 11: Additional qualitative result where all three VET roles are generated.
+Figure 12: Qualitative result where multiple <NEG> tokens are generated to indicate different distactors.
+Figure 13: Qualitative result where only two type of VET roles are generated.
+D.3 Failure Case Analysis and Limitations
+Failure cases.
+Figure聽 14 , 15 , and聽 16 show representative failures caused by limited target visibility and instance-level ambiguity. When the target is fully occluded, has not yet appeared, or is visible only briefly, limited visual and temporal context may lead to spurious attention activations in irrelevant regions. When multiple visually similar objects are present, the MLLM may struggle to identify the referred target during CoT reasoning, causing VET attention to focus on incorrect instances.
+Figure 14: Representative failure case on MeViS_u, where the fast-moving hand appears in too few of the six uniformly sampled input frames to provide sufficient temporal and visual context.
+Figure 15: Representative failure case where the VET attention maps fail to distinguish the target among a group of similar tigers.
+Figure 16: Representative failure case where ReVEAL fails to distinguish the target from textual reasoning when numerous visually similar distractors are present.
+Limitations.
+Despite its effectiveness, ReVEAL has several limitations.
+First, the current <NEG> design may not adequately distinguish individual distractors when multiple visually similar objects appear in more complex scenes.
+Second, VET grounding can become unreliable when MLLM attention is diffuse or focused on irrelevant regions, particularly under severe occlusion.
+Third, the current uniform sampling strategy may miss frames containing key visual entities, leaving them absent from the model input. The resulting lack of visual context may limit the model鈥檚 ability to reason effectively and produce reliable latent visual evidence.
+Future work could explore lightweight optimizations centered on the MLLM鈥檚 own video reasoning for ReVOS. For example, a frame selection module inspired by GLUS聽 ( Lin et al., 2025 ) and CoT-RVS聽 ( Kao et al., 2025 ) could help retain informative frames. More broadly, we will explore extending this efficient MLLM-centric design to omni scenarios.
+Experimental support, please
+view the build logs
+for errors. Generated by
+xml
+Instructions for reporting errors
+We are continuing to improve HTML versions of papers, and your feedback helps enhance accessibility and mobile
+support. To report errors in the HTML that will help us improve conversion and rendering, choose any of the
+methods listed below:
+Click the "Report Issue" (
+) button, located in the page header.
+Tip: You can select the relevant text first, to include it in your report.
+Our team has already identified the following issues . We appreciate your time reviewing and reporting rendering errors we
+may not have found yet. Your efforts will help us improve the HTML versions for all readers, because disability
+should not be a barrier to accessing research. Thank you for your continued support in championing open access for
+all.
+Have a free development cycle? Help support accessibility at arXiv! Our collaborators at LaTeXML maintain a list of packages that need conversion , and welcome developer contributions .
+We gratefully acknowledge support from our major funders ,
+member institutions , ,
+and all contributors.
+About &middot;
+Help &middot;
+Contact &middot;
+Subscribe &middot;
+Copyright &middot;
+Privacy &middot;
+Accessibility &middot;
+Operational Status (opens in new tab)

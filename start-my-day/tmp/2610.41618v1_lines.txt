@@ -1,0 +1,1440 @@
+﻿Attention Maps Know When to Think: Training-Free Difficulty-Aware Chain-of-Thought for Reasoning Segmentation
+Skip to main content
+Report GitHub Issue
+Title:
+Content selection saved. Describe the issue below:
+Description:
+Submit without GitHub
+Submit in GitHub
+Why HTML?
+Report Issue
+Back to Abstract
+Download PDF
+Contents
+Reading mode
+Colour theme
+Abstract
+1 Introduction
+2 Related Work
+2.1 Multimodal Large Language Models (MLLMs)
+2.2 Reasoning Segmentation
+2.3 Chain-of-Thought in Multimodal Contexts
+3 Preliminary Analysis
+3.1 Entropy of Attention Map
+3.2 Difficulty Awareness via Entropy
+4 Method
+4.1 Overview of DA-CoT framework
+4.2 Determining Attention Layers & Threshold
+4.3 Bidirectional Rethinking
+5 Experiments
+5.1 Experimental Settings
+5.2 Main Results
+5.3 Plug-and-Play Generalization
+5.4 Ablation Studies
+6 Conclusion
+7 Acknowledgments
+References
+A Methodological Details
+A.1 CoT Prompt Design and Baseline Validation
+A.2 Elbow Detection Algorithm
+A.3 Validity of the Entropy Formulation
+A.4 DA-CoT Algorithm
+A.5 Mathematical Formulation of DA-CoT
+Attention Entropy.
+Entropy-Sensitive Layer Selection.
+Layer-Aggregated Entropy.
+Second-Elbow Threshold.
+Validity of the Entropy Formulation.
+Alternative Per-Head Entropy.
+B Additional Experiment Results
+B.1 Layer and Threshold Determination
+B.2 Robustness of Proxy Set Construction
+B.3 Robustness in Proxy-Set-Free Environments.
+B.4 Per-Sample CoT Benefit: Target-Size Control
+B.5 Additional comparison on ReasonSeg.
+C Bidirectional Rethinking Analysis
+C.1 Rule-based Failure Detection
+C.2 Activation Frequency and Recovery Behavior
+C.3 Design Motivation and Efficiency
+D Qualitative Analysis and Case Studies
+D.1 Further Examples of CoT-Beneficial and CoT-Detrimental Cases
+D.2 Quantitative Analysis of CoT-Induced Failures
+D.3 Overthinking in CoT-Optimized Models
+D.4 Failure Cases and Limitations of DA-CoT
+License: arXiv.org perpetual non-exclusive license
+arXiv:2610.41618v1 [cs.CV] 30 Oct 2026
+Attention Maps Know When to Think:
+Training-Free Difficulty-Aware Chain-of-Thought for Reasoning Segmentation
+Chanseul Cho
+鈥冣€?/span>
+Jaesung JunDongheon LeeYoungmin Ro * Machine Intelligence Laboratory, University of SeoulData Science Interdisciplinary Major https://github.com/chanseul01/DA-CoT
+Abstract
+Chain-of-Thought聽(CoT) prompting has become a standard reasoning strategy in Multi-modal Large Language Models聽(MLLMs), showing strong performance in complex vision-language tasks such as reasoning segmentation.
+However, our analysis reveals that indiscriminate CoT usage can lead to degraded performance by inducing unnecessary reasoning, a phenomenon we term overthinking.
+In reasoning segmentation, overthinking often leads to misalignment between the query鈥檚 intent and visual grounding.
+To address this, we propose Difficulty-Aware Chain-of-Thought聽(DA-CoT), a training-free adaptive framework that selectively triggers CoT based on the input鈥檚 intrinsic difficulty.
+We find that the entropy of the model鈥檚 attention maps reliably reflects task difficulty: low entropy indicates confident, localized grounding, while high entropy suggests uncertainty and potential benefit from CoT.
+DA-CoT uses this entropy signal to determine whether to apply CoT prompting.
+Additionally, we introduce a Bidirectional Rethinking mechanism that enables the model to automatically flip its reasoning decision when the initial output fails, enhancing robustness by recovering from failures induced by overthinking and underthinking.
+DA-CoT demonstrates its effectiveness by achieving state-of-the-art performance on the Reasoning Segmentation benchmarks while significantly improving inference efficiency.
+1 1 footnotetext: Corresponding author. 3 3 footnotetext: Equal contribution.
+1 Introduction
+Figure 1 : Comparison of pretrained MLLMs applied to reasoning segmentation in a training-free manner, with and without Chain-of-Thought (CoT) prompting. The CoT-prompted model fails due to overthinking caused by excessive spatial reasoning, while the model without CoT correctly identifies the bicycle.
+Figure 2 : Qualitative examples illustrating the contrasting effects of CoT prompting in reasoning segmentation.
+Left : CoT-detrimental cases, where CoT leads to misgrounding by overthinking spatial reasoning; without CoT, the model correctly identifies the target with concentrated attention and low entropy.
+Right : CoT-beneficial cases, where CoT enhances performance in ambiguous scenarios by guiding reasoning towards the correct region, as reflected in high-entropy attention maps.
+The visualized attention entropy (bottom right of each map) provides an intrinsic signal that distinguishes when CoT is helpful or harmful.
+Multi-modal Large Language Models (MLLMs) have demonstrated strong performance on a wide range of vision-language tasks, largely attributed to their advanced reasoning capabilities.
+Among various prompting strategies, Chain-of-Thought (CoT) prompting has emerged as a powerful technique for eliciting step-by-step reasoning, enabling models to break down complex queries into intermediate inferences聽 [ 40 ] .
+As a result, CoT has become a default reasoning framework across vision-language tasks, including complex visual question answering, referring expression comprehension, and reasoning segmentation鈥攁 task requiring both spatial understanding and logical deduction 聽 [ 22 , 24 , 6 , 8 , 4 ] .
+Reasoning segmentation has recently emerged as a key benchmark for evaluating how well models align visual perception with high-level reasoning, and recent approaches have incorporated CoT prompting to achieve highly competitive results聽 [ 25 , 10 , 23 , 7 ] .
+However, in line with recent evidence that additional reasoning does not universally benefit language and multimodal models聽 [ 42 , 35 , 37 ] , our empirical findings challenge this prevailing trend in reasoning segmentation: we observe that indiscriminate use of CoT prompting can lead to degraded performance due to overthinking , where the model engages in unnecessary or misleading reasoning steps that distort the grounding process and lead to incorrect predictions.
+As shown in Figure聽 1 , the model correctly identifies the target region without CoT, but CoT prompting flips a correct localization into a misgrounded prediction by inducing unnecessary spatial reasoning that dilutes the model鈥檚 focus on the query鈥檚 intent.
+These findings reveal that, in reasoning segmentation, unnecessary CoT reasoning can compromise the alignment between linguistic intent and visual evidence, often leading to performance degradation. We provide a quantitative breakdown of these failure modes in the supplementary material (Sec.聽 D.2 ).
+Building upon these observations, we propose DA-CoT (Difficulty-Aware Chain-of-Thought), a training-free reasoning segmentation framework that adaptively triggers CoT reasoning based on the intrinsic difficulty of each sample, as estimated from the model鈥檚 attention maps.
+As illustrated in Figure聽 2 , CoT-beneficial and CoT-detrimental cases exhibit markedly different attention patterns.
+Interestingly, when CoT is unnecessary, the attention map from the < < SOS > > token to the visual tokens (hereafter referred to as the attention map ) shows low entropy, indicating that the model鈥檚 focus is already well localized to the relevant region.
+In contrast, CoT-beneficial cases exhibit high-entropy attention, reflecting dispersed focus and uncertainty in spatial grounding.
+These findings suggest that the model鈥檚 internal attention entropy serves as a reliable signal for determining whether CoT reasoning should be applied.
+Leveraging this signal, DA-CoT effectively distinguishes cases that do not require CoT, thus avoiding overthinking. Consequently, by adaptively bypassing unnecessary reasoning, it significantly improves inference efficiency.
+Furthermore, to enhance the robustness of the proposed adaptive reasoning path, we introduce a Bidirectional Rethinking Mechanism , which provides a fallback strategy when the initially selected reasoning path fails to produce a valid output.
+In such cases, the model automatically reverts to the alternative reasoning mode (with or without CoT), mimicking the human tendency to 鈥渞ethink鈥?a problem from the opposite perspective.
+This dual-path reasoning grants the model a second opportunity to recover from potential failures caused by either overthinking or underthinking.
+Extensive experiments on Reasoning Segmentation and Referring Segmentation benchmarks demonstrate that our approach consistently improves performance, yielding strong results overall and demonstrating superior performance compared to prior works on Reasoning Segmentation.
+Interestingly, DA-CoT outperforms existing methods that enhance their CoT capabilities through Reinforcement Learning聽 [ 22 , 10 , 23 ] , highlighting the strength of our training-free adaptive design.
+Moreover, when integrated into existing learning-based reasoning frameworks, our method consistently enhances their performance, confirming its compatibility and general applicability.
+Comprehensive ablation studies further validate the effectiveness of each proposed component.
+We make the following contributions:
+鈥?/span>
+We challenge the prevailing view that Chain-of-Thought (CoT) prompting should be applied by default, revealing that indiscriminate CoT usage can cause overthinking and degrade grounding accuracy in reasoning segmentation.
+鈥?/span>
+We discover that the entropy of attention maps reflects task difficulty, providing a simple yet effective intrinsic signal for determining when CoT reasoning is beneficial or detrimental.
+鈥?/span>
+We propose a training-free adaptive reasoning framework that integrates DA-CoT (Difficulty-Aware Chain-of-Thought) and a Bidirectional Rethinking Mechanism , where DA-CoT selectively applies CoT reasoning based on attention entropy to avoid overthinking, and the rethinking mechanism enhances robustness by enabling automatic fallback between reasoning modes for recovering from both overthinking- and underthinking-induced failures.
+鈥?/span>
+Our approach outperforms prior training-based methods on ReasonSeg, while achieving competitive performance on Referring Segmentation. Furthermore, it demonstrates lower inference time and plug-and-play compatibility across diverse MLLM scales and architectures.
+2 Related Work
+2.1 Multimodal Large Language Models (MLLMs)
+Building on the success of LLMs, early MLLMs such as LLaVA聽 [ 20 , 21 ] and BLIP-2聽 [ 17 ] aligned pre-trained vision encoders with
+LLMs through visual instruction tuning. Recent models, including the
+Qwen-VL series聽 [ 2 ] and GLM-4.1V-Thinking聽 [ 9 ] ,
+further improve multimodal reasoning through larger scales and
+reinforcement learning. These advances enable complex tasks beyond VQA,
+including the reasoning segmentation studied in this work.
+2.2 Reasoning Segmentation
+The task of Reasoning Segmentation was first proposed by LISA聽 [ 16 ] , requiring models to generate segmentation masks from complex and implicit text queries. LISA pioneered the 鈥渆mbedding-as-mask鈥?paradigm, adding a < < SEG > > token to the MLLM鈥檚 vocabulary to grant it pixel-level generation capabilities.
+Subsequent works refine this paradigm for efficiency, replacing the
+external segmentation model with a lightweight decoder聽 [ 31 ] or
+prompting SAM聽 [ 15 ] with MLLM-generated points聽 [ 5 ] .
+In a different direction, RSVP聽 [ 25 ] presented a training-free two-stage framework separating reasoning from segmentation, leveraging visual prompting to utilize the MLLM鈥檚 inherent localization abilities. Also training-free, ThinkFirst聽 [ 13 ] prompts GPT-4o to produce a chain-of-thought description of the image that conditions a downstream segmentation assistant, applying CoT unconditionally to every query.
+Advanced training strategies have also been a key research focus. Seg-Zero聽 [ 22 ] demonstrated that reasoning abilities can be elicited via cognitive reinforcement learning (RL) without explicit reasoning data, achieving strong zero-shot performance on the ReasonSeg benchmark. SAM-R1聽 [ 10 ] also utilized RL, uniquely integrating SAM 2聽 [ 29 ] as a reward provider to enhance alignment between reasoning and segmentation. Recently, SAM-Veteran聽 [ 7 ] extended this paradigm by training an MLLM agent to mimic interactive segmentation through iterative mask refinement.
+While these training-based methods have successfully advanced the field, they all apply a fixed reasoning strategy. Our work departs from this training-centric approach to propose a training-free framework that dynamically modulates the reasoning strategy.
+2.3 Chain-of-Thought in Multimodal Contexts
+Chain-of-Thought was a prompting technique proposed for LLMs to solve
+complex reasoning problems by generating intermediate steps聽 [ 40 ] .
+This method has been adapted for MLLMs. Models like
+VisionReasoner聽 [ 23 ] have sought to improve performance
+by generating structured reasoning processes, and other studies have
+explored integrating visual information into the
+CoT聽 [ 48 , 34 ] .
+While such efforts to enhance CoT capabilities have been active, the question of when to activate CoT has remained unaddressed. CoT is a powerful tool, but its benefits are not universal.
+Recent studies in NLP have pointed out that applying CoT to simple problems that do not require multi-step reasoning can induce 鈥渙verthinking,鈥?leading to performance degradation聽 [ 42 , 35 ] .
+This risk is acute in reasoning segmentation, where unnecessary CoT can
+disrupt the precise visual grounding the task depends on.
+Tian et al.聽 [ 37 ] recently showed that in reasoning-trained MLLMs, prolonged reasoning progressively weakens perceptual grounding, and mitigated this effect by retraining the model with vision-anchored policy optimization.
+In contrast to existing research focused on enhancing CoT capabilities through training聽 [ 37 , 10 , 22 , 23 ] , our work explores the problem of when to activate CoT. We analyze the model鈥檚 internal attention mechanisms to propose an adaptive, training-free framework that selectively leverages the strengths of CoT while avoiding its potential pitfalls.
+3 Preliminary Analysis
+We observe, through empirical findings such as Figure聽 2 , that it may be possible to determine whether CoT prompting should be applied to a given sample based on intrinsic signals 鈥攚ithout requiring any additional training.
+This section presents preliminary analyses aimed at establishing such signals as quantifiable indicators for CoT triggering.
+Figure 3 :
+Attention entropy predicts sample difficulty and per-sample CoT benefit using Qwen2.5VL-7B.
+(a)聽Mean attention entropy of easy vs. difficult samples on the proxy set ( n = 1,000 n=1{,}000 ) at the three layers selected in Sec.聽 4 ; error bars: 卤 1 \pm 1 SEM; *: Mann鈥揥hitney U U p < 0.05 p<0.05 .
+(b)聽Per-sample 螖 \Delta IoU vs. attention entropy (z-scored within each split) on held-out ReasonSeg val+test (invalid outputs score IoU = 0 =0 ); gray: individual samples, red: octile means with 95% CI.
+(c)聽ROC for predicting 螖 鈥?/mo> IoU > 0 \Delta\text{IoU}>0 from entropy alone (ties excluded).
+(d)聽Mean IoU per entropy quartile with and without CoT, computed over each mode鈥檚 valid outputs (bars, left axis), and per-mode model-failure rates (dashed, right axis; Sec.聽 C.1 ).
+3.1 Entropy of Attention Map
+We begin by formalizing the entropy of the attention map as an intrinsic signal for reasoning behavior in the reasoning segmentation task.
+In this setting, the input to the multi-modal model consists of a query sentence, an image, and a special <SOS> token.
+The full input sequence includes both language tokens and visual tokens, which are jointly encoded by the transformer backbone.
+To isolate the model鈥檚 grounding behavior, we examine the attention map from the <SOS> token to only the visual tokens.
+Formally, let Q s 鈥?/mo> o 鈥?/mo> s 鈭?/mo> 鈩?/mi> 1 脳 d Q_{sos}\in\mathbb{R}^{1\times d} denote the query vector corresponding to the <SOS> token, and let K v 鈥?/mo> i 鈥?/mo> s 鈭?/mo> 鈩?/mi> N vis 脳 d K_{vis}\in\mathbb{R}^{N_{\text{vis}}\times d} represent the key matrix of N N visual tokens extracted from the image, where d d is the hidden dimension.
+For each attention head h 鈭?/mo> { 1 , 鈥?/mi> , H } h\in\{1,...,H\} , the attention weights are computed as 饾悮 h = softmax 鈥?/mo> ( Q s 鈥?/mo> o 鈥?/mo> s h 鈥?/mo> ( K v 鈥?/mo> i 鈥?/mo> s h ) 鈯?/mo> d / H ) \mathbf{a}_{h}=\text{softmax}\left(\frac{Q_{sos}^{h}(K_{vis}^{h})^{\top}}{\sqrt{d/H}}\right) , where 饾悮 h 鈭?/mo> 鈩?/mi> N vis \mathbf{a}_{h}\in\mathbb{R}^{N_{\text{vis}}} is the attention distribution over the visual tokens for head h h . To obtain the final attention map, we average the attention weights across all heads: 饾悮 = 1 H 鈥?/mo> 鈭?/mo> h = 1 H 饾悮 h \mathbf{a}=\frac{1}{H}\sum_{h=1}^{H}\mathbf{a}_{h} . Using Shannon entropy, we define the attention entropy as 鈩?/mi> attn = 鈭?/mo> 鈭?/mo> i = 1 N vis 饾悮 [ i ] log 饾悮 [ i ] \mathcal{H}_{\text{attn}}=-\sum_{i=1}^{N_{\text{vis}}}\mathbf{a}[i]\log\mathbf{a}[i] , which quantifies the dispersion of attention over the visual tokens as a single scalar value.
+A low entropy value indicates that the model鈥檚 attention is sharply focused on specific visual regions, suggesting confident grounding, whereas high entropy reflects a more diffuse focus, typically associated with uncertainty in resolving the query.
+Intuitively, the <SOS> token reflects the model鈥檚 grounding state before reasoning begins: when the answer is directly resolvable, attention concentrates on the target, yielding low entropy; when reasoning is required, the answer is not yet resolved, leaving attention dispersed.
+This metric offers a lightweight and training-free estimate of the model鈥檚 internal uncertainty regarding visual grounding. Further analysis of this entropy formulation is provided in the supplementary material (Sec.聽 A.3 ).
+3.2 Difficulty Awareness via Entropy
+Attention entropy, as defined in Section聽 3.1 , quantifies how concentrated the model鈥檚 visual focus is.
+Following Kang et al.聽 [ 12 ] , we sample 1,000 instances from the training splits of segmentation datasets聽 [ 14 , 44 ] , run inference with Qwen2.5VL-7B without CoT prompting, and label samples with IoU 鈮?/mo> 0.5 \leq 0.5 as difficult and the rest as easy .
+Across the three layers later selected by our variance criterion (layers 23鈥?5; Sec.聽 4 ), difficult samples exhibit significantly higher entropy (Fig.聽 3 (a); Mann鈥揥hitney U U , p < 0.05 p<0.05 ).
+Since our framework triggers CoT per sample (Sec.聽 4 ), we further examine the effect of CoT at the level of individual samples.
+We run inference twice, with and without CoT prompting, on all held-out ReasonSeg val/test samples and measure 螖 鈥?/mo> IoU = IoU CoT 鈭?/mo> IoU Non-CoT \Delta\text{IoU}=\text{IoU}_{\text{CoT}}-\text{IoU}_{\text{Non-CoT}} .
+Entropy, aggregated over the same three layers, shows a monotone relation with this benefit (Fig.聽 3 (b); Spearman 蟻 = + 0.60 \rho=+0.60 , and + 0.57 +0.57 after partialling out log target size, Sec.聽 B.4 ): CoT degrades low-entropy samples and improves high-entropy ones.
+Used as a per-sample predictor of whether CoT helps ( 螖 鈥?/mo> IoU > 0 \Delta\text{IoU}>0 ), entropy attains AUC = 0.870 =0.870 (Fig.聽 3 (c)).
+Fig.聽 3 (d) further shows an entropy-dependent trend that holds despite higher failure rates: CoT degrades low-entropy samples, while becoming increasingly beneficial as entropy rises. Model failures are more frequent under CoT, motivating the Bidirectional Rethinking mechanism to recover from such cases (Secs.聽 4.3 , C ).
+4 Method
+Building upon Section聽 3 , we propose DA-CoT, a training-free framework designed to mitigate overthinking in reasoning segmentation. DA-CoT adaptively determines whether to apply CoT prompting by leveraging the intrinsic attention-entropy signal, and further enhances robustness through a human-inspired rethinking mechanism.
+4.1 Overview of DA-CoT framework
+Figure聽 4 presents the overall structure of the proposed DA-CoT framework, which operates in three stages:
+(1) layer and threshold determination,
+(2) difficulty-aware CoT, and
+(3) bidirectional rethinking.
+Layer and Threshold Determination Phase.
+Using a fixed proxy set 饾挓 proxy \mathcal{D}_{\text{proxy}} , we identify the top- k k layers
+鈩?/mi> \mathcal{L} exhibiting the largest attention-entropy variance across samples.
+From the aggregated entropy distribution of these layers, the second elbow point is selected as the attention threshold 蟿 \tau (Sec.聽 4.2 ). These parameters are fixed for the backbone model and directly applied across downstream datasets.
+Difficulty-Aware CoT Phase.
+Given an image鈥搎uery pair, the model computes the aggregated attention entropy 鈩?/mi> agg \mathcal{H}_{\text{agg}} using the pre-selected layers 鈩?/mi> \mathcal{L} .
+If 鈩?/mi> agg \mathcal{H}_{\text{agg}} exceeds the threshold 蟿 \tau , the model activates CoT prompting to engage in structured reasoning;
+otherwise, it proceeds with direct prediction without additional reasoning steps.
+This selective mechanism prevents unnecessary reasoning on easy samples while maintaining high reasoning capability for ambiguous ones.
+Bidirectional Rethinking Phase.
+When the initial reasoning path fails to yield a valid output, a discrete flipping signal reverses the reasoning decision (activating CoT if it was disabled, or vice versa) and triggers
+a single second inference pass (Sec.聽 4.3 ). Finally, the MLLM outputs bounding boxes or point prompts, which are passed to a segmentation head to generate the final reasoning-aware segmentation result.
+Figure 4 :
+Overview of the proposed DA-CoT framework during inference.
+The aggregated attention entropy 鈩?/mi> agg \mathcal{H}_{\text{agg}} , computed over the pre-identified layers 鈩?/mi> \mathcal{L} , is used to adaptively decide whether to trigger CoT reasoning.
+If 鈩?/mi> agg 鈮?/mo> 蟿 \mathcal{H}_{\text{agg}}\geq\tau , the model follows the Difficulty-Aware Prompting Path with CoT for structured reasoning; otherwise, it takes the direct path without CoT for efficient inference.
+When the initial reasoning path fails to produce a valid output, a discrete flipping signal activates the Bidirectional Rethinking Path , enabling re-evaluation and recovery from overthinking or underthinking.
+The final bounding boxes or point prompts are then passed to the segmentation head to produce the reasoning-aware segmentation result.
+4.2 Determining Attention Layers & Threshold
+To enable adaptive reasoning, DA-CoT relies solely on the internal attention entropy extracted from pretrained MLLMs.
+We design a procedure to determine two key components:
+(i) the set of layers 鈩?/mi> \mathcal{L} most responsive to reasoning difficulty, and
+(ii) the attention threshold 蟿 \tau for CoT triggering.
+These parameters are computed once for a given backbone and then reused across downstream benchmarks.
+Proxy Set.
+We construct a proxy dataset 饾挓 proxy \mathcal{D}_{\text{proxy}} consisting of 1,000 image鈥搎uery pairs randomly sampled from the training splits of segmentation datasets聽 [ 14 , 44 ] .
+This procedure requires no segmentation labels ; we only run a standard forward pass (without CoT) to extract attention maps and compute entropies. Further analysis of the proxy set is provided in the supplementary material (Sec.聽 B.2 , Sec.聽 B.3 ).
+Layer Selection.
+The layers for entropy measurement should satisfy two implicit conditions: (1) being highly correlated with the model鈥檚 grounding capability, and (2) being sensitive to differences in reasoning difficulty.
+Although these properties cannot be directly observed, they can be approximated by identifying layers with high entropy variance across the proxy set as 鈩?/mi> = Topk 鈩?/mi> 鈦?/mo> ( Var x 鈭?/mo> 饾挓 proxy 鈦?/mo> [ 鈩?/mi> attn ( 鈩?/mi> ) 鈥?/mo> ( x ) ] ) \mathcal{L}=\operatorname{Topk}_{\ell}\big(\operatorname{Var}_{x\in\mathcal{D}_{\text{proxy}}}[\mathcal{H}_{\text{attn}}^{(\ell)}(x)]\big) .
+Layers exhibiting large variance effectively capture the transition between confident (low-entropy) and uncertain (high-entropy) grounding behaviors, thus serving as discriminative indicators of difficulty.
+In our experiments, k = 3 k=3 layers provide stable and generalizable performance. Notably, this simple variance-based approach consistently identifies mid-to-late layers, aligning with recent findings聽 [ 12 , 47 , 46 ] that highlight these layers as significant for multi-modal reasoning and grounding.
+Attention Threshold.
+For each sample x i 鈭?/mo> 饾挓 proxy x_{i}\in\mathcal{D}_{\text{proxy}} , the aggregated attention entropy is defined as 鈩?/mi> agg 鈥?/mo> ( x i ) = 1 k 鈥?/mo> 鈭?/mo> 鈩?/mi> 鈭?/mo> 鈩?/mi> 鈩?/mi> attn ( 鈩?/mi> ) 鈥?/mo> ( x i ) \mathcal{H}_{\text{agg}}(x_{i})=\frac{1}{k}\sum_{\ell\in\mathcal{L}}\mathcal{H}_{\text{attn}}^{(\ell)}(x_{i}) .
+Sorting 鈩?/mi> agg \mathcal{H}_{\text{agg}} values in ascending order yields an S-shaped distribution (Figure聽 5 ).
+To identify elbow points, we employ the perpendicular-distance鈥揵ased elbow detection method聽 [ 32 ] : we first find the point with the maximum perpendicular distance to the line connecting the first and last points (first elbow), and then apply the same procedure to the tail subsequence to obtain the second elbow. Detailed mathematical formulations are provided in the supplementary material (Sec.聽 A.2 ).
+We empirically determine the second elbow point as the decision threshold 蟿 \tau given by 蟿 = SecondElbow 鈥?/mo> ( { 鈩?/mi> agg 鈥?/mo> ( x i ) } i = 1 | 饾挓 proxy | ) \tau=\text{SecondElbow}\big(\{\mathcal{H}_{\text{agg}}(x_{i})\}_{i=1}^{|\mathcal{D}_{\text{proxy}}|}\big) .
+As described in Figure聽 5 , samples below the first elbow correspond to easy and small-object cases, those between elbows to medium-complexity samples with relatively larger objects, and those beyond the second elbow to difficult reasoning cases requiring CoT prompting. While this stratification partly tracks target size, a size-controlled analysis shows that entropy predicts difficulty and CoT benefit beyond size alone (Sec.聽 B.4 ).
+Using 饾挓 proxy \mathcal{D}_{\text{proxy}} , 蟿 \tau activates CoT in only about 21.2% of cases鈥攁chieving superior efficiency compared to the first elbow point that would invoke CoT in 90.8% of cases, as shown in Table聽 1 .
+Figure 5 :
+Distribution of aggregated attention entropy 鈩?/mi> agg \mathcal{H}_{\text{agg}} over the proxy set.
+The curve exhibits an S-shaped trend with two elbow points that divide samples by reasoning difficulty.
+Samples below the first elbow correspond to easy and small-object cases with confident grounding,
+those between elbows represent medium-complexity examples with larger objects,
+and those beyond the second elbow correspond to difficult reasoning cases that require CoT prompting.
+The second elbow is selected as the decision threshold 蟿 \tau for adaptive CoT activation.
+Table 1 : Comparative analysis of entropy threshold selection strategies. Performance (gIoU in %) and CoT usage are measured without Bidirectional Rethinking. Evaluation is performed on the proxy set described in Section聽 3.2 .
+Threshold Strategy
+All-CoT
+First Elbow
+Median
+Second Elbow
+All-Non-CoT
+gIoU
+66.7
+67.3
+67.8
+68.2
+62.1
+CoT Usage (%)
+100.0
+90.8
+49.2
+21.2
+0.0
+4.3 Bidirectional Rethinking
+While DA-CoT effectively adapts CoT prompting using intrinsic signals, reasoning segmentation may still involve ambiguous visual-linguistic grounding where deterministic triggering is insufficient. To strengthen robustness, we introduce a Bidirectional Rethinking mechanism, inspired by how humans reassess an initial judgment upon sensing that a problem was oversimplified or overcomplicated.
+When the initial reasoning attempt produces incomplete or invalid outputs ( e.g . missing coordinates or coordinate fields), DA-CoT automatically performs a rethinking step.
+In this step, the model reprocesses the same input through the complementary reasoning path, providing a rule-based fallback that enhances output reliability.
+This mechanism grants the model a second opportunity to recover from failures caused by excessive or insufficient reasoning, thereby reinforcing the robustness of the framework.
+5 Experiments
+We use generalized Intersection-over-Union聽(gIoU) for reasoning segmentation and cumulative Intersection-over-Union聽(cIoU) for referring segmentation as evaluation metrics, following prior work聽 [ 16 , 23 , 7 , 10 , 22 ] .
+Best and second-best scores are shown in bold and underlined , respectively, and our method is highlighted in gray .
+5.1 Experimental Settings
+Datasets. We evaluate our method on a comprehensive set of standard benchmarks for reasoning and referring expression segmentation. For reasoning segmentation, we use the ReasonSeg dataset聽 [ 16 ] , which is specifically designed to test complex visual-linguistic reasoning abilities. For referring expression segmentation, we use the widely-adopted RefCOCO, RefCOCO+, and RefCOCOg datasets聽 [ 14 , 44 ] . Following established protocols, we use the official test splits for evaluation.
+Implementation Details.
+Our experiments are primarily conducted on the Qwen2.5VL-7B model. Accordingly, unless stated otherwise, the results for our proposed DA-CoT-7B method in the tables refer to this Qwen2.5VL-7B-based implementation. For mask generation, we employ SAM2-Large聽 [ 29 ] , which takes positional prompts from the MLLM. To demonstrate the plug-and-play generalizability of our method, we also test it on a diverse set of models, including Seg-Zero, VisionReasoner, Qwen2.5VL-32B, Qwen2.5VL-72B, Qwen3VL-8B, and GLM4.1V-9B. For image preprocessing, inputs for the Qwen models are resized to 840 脳 \times 840 pixels. Following prior work聽 [ 16 , 22 , 23 , 10 , 7 ] , all methods use deterministic decoding, and we report single-run results. The complete procedure is detailed in the supplementary material (Sec.聽 A.4 ).
+5.2 Main Results
+We evaluate our proposed method on two challenging tasks: Reasoning Segmentation and Referring Expression Segmentation. The result for Seg-Zero-7B 鈥?/span> was re-evaluated in SAM-R1聽 [ 10 ] using the officially released model weights.
+Table 2 : Performance comparison with zero-shot models on ReasonSeg benchmark. Performance is reported as gIoU.
+鈥?/span> denotes performance re-evaluated by聽 [ 10 ] .
+Method
+ReasonSeg
+val
+test
+Avg.
+Training-based methods
+OVSeg聽 [ 18 ]
+28.5
+26.1
+27.3
+ReLA聽 [ 19 ]
+22.4
+21.3
+21.9
+SAM4MLLM聽 [ 5 ]
+46.7
+LISA-7B-LLaVA1.5聽 [ 16 ]
+53.6
+48.7
+51.2
+LISA-13B-LLaVA1.5聽 [ 16 ]
+57.7
+53.8
+55.8
+Seg-Zero-7B 鈥?/span> 聽 [ 22 ]
+62.0
+58.3
+60.2
+SAM-R1-7B聽 [ 10 ]
+64.0
+60.2
+62.1
+VisionReasoner-7B聽 [ 23 ]
+66.3
+63.6
+65.0
+SAM-Veteran-7B聽 [ 7 ]
+68.2
+62.6
+65.4
+Training-free methods
+Grounded-SAM聽 [ 30 ]
+26.0
+21.3
+23.7
+ThinkFirst聽 [ 13 ]
+48.6
+RSVP-Qwen聽 [ 25 ]
+58.6
+56.6
+57.6
+SAM3 Agent + + Qwen-7B聽 [ 3 ]
+62.2
+63.0
+62.6
+DA-CoT-7B
+68.0
+64.6
+66.3
+Reasoning Segmentation.
+We first compare our method against existing models on the ReasonSeg benchmark.
+As presented in Table聽 2 , our method achieves state-of-the-art performance on the ReasonSeg Benchmark. Remarkably, our training-free approach outperforms even task-specifically trained systems, including the strongest RL-trained methods聽 [ 22 , 10 , 23 , 7 ] that share our Qwen2.5-VL-7B backbone and SAM2-based mask generation.
+Referring Expression Segmentation.
+To assess the generality of our method beyond complex reasoning tasks, we evaluate it on standard referring benchmarks. We use the testA set for RefCOCO and RefCOCO+, and the test set for RefCOCOg.
+As shown in Table聽 3 , DA-CoT also achieves competitive performance on standard referring expression segmentation, indicating that its benefits are not confined to reasoning-intensive queries.
+Broader Vision-Language Tasks.
+To further assess the applicability of DA-CoT beyond segmentation, we evaluate our method on two broader vision-language benchmarks, LogicVista聽 [ 41 ] and MMVP聽 [ 38 ] . LogicVista evaluates multimodal logical reasoning in diverse visual contexts, while MMVP assesses fine-grained visual understanding through challenging image pairs with subtle visual differences. As shown in Table聽 4 , DA-CoT consistently improves over All-CoT and All-Non-CoT on both benchmarks, demonstrating the broader applicability of our adaptive reasoning strategy.
+5.3 Plug-and-Play Generalization
+A key advantage of our method is its potential for plug-and-play generalization. We investigate this capability across both different reasoning methods and different baseline MLLMs.
+Table 3 : Performance comparison on Referring Expression Segmentation benchmark. Performance is reported as cIoU. 鈥?/span> denotes performance re-evaluated by聽 [ 10 ] .
+Method
+ReferringSeg
+COCO
+COCO+
+COCOg
+Avg.
+Training-based methods
+LAVT聽 [ 43 ]
+75.8
+68.4
+62.1
+68.8
+ReLA聽 [ 19 ]
+76.5
+71.0
+66.0
+71.2
+LISA-7B-LLaVA1.5聽 [ 16 ]
+76.5
+67.4
+68.5
+70.8
+PixelLM-7B聽 [ 31 ]
+76.5
+71.7
+70.5
+72.9
+PerceptionGPT-7B聽 [ 28 ]
+78.6
+73.9
+71.7
+74.7
+VisionReasoner-7B聽 [ 23 ]
+78.9
+74.9
+71.3
+75.0
+Seg-Zero-7B 鈥?/span> 聽 [ 22 ]
+79.2
+73.9
+73.3
+75.5
+SAM-R1-7B聽 [ 10 ]
+79.2
+74.7
+73.1
+75.7
+SAM-Veteran-7B聽 [ 7 ]
+80.8
+76.6
+73.4
+76.9
+Training-free methods
+Yu et al.聽 [ 45 ]
+23.6
+24.9
+31.1
+26.5
+TAS聽 [ 36 ]
+30.3
+38.8
+36.2
+35.1
+Ref-Diff聽 [ 27 ]
+37.4
+38.7
+38.0
+38.0
+IteRPrimE聽 [ 39 ]
+46.5
+51.6
+45.8
+48.0
+Kang et al.聽 [ 12 ]
+78.9
+67.1
+69.0
+71.7
+DA-CoT-7B
+77.7
+72.4
+70.7
+73.6
+Generalization across MLLMs.
+To demonstrate that our framework鈥檚 benefits are not confined to this specific baseline, we assessed its performance across a spectrum of more powerful models. This includes Seg-Zero and VisionReasoner which enhance CoT reasoning capabilities based on Qwen2.5VL-7B聽 [ 2 ] , larger-scale models like Qwen2.5VL-32B聽 [ 2 ] and Qwen2.5VL-72B聽 [ 2 ] , as well as the architecturally advanced Qwen3VL-8B聽 [ 1 ] , and GLM4.1V-9B聽 [ 9 ] . As shown in Table聽 5 , our method consistently delivers performance gains across these models. This finding suggests that our approach is not narrowly tuned to a specific baseline and can effectively scale to enhance the performance of larger and more recent MLLMs.
+5.4 Ablation Studies
+Impact of Proposed Components.
+We conduct an ablation study to analyze the contribution of each component. First, we design an improved CoT prompt inspired by existing research聽 [ 49 ] , the details of which are provided in the supplementary material (Sec.聽 A.1 ). Our baseline is established as All-CoT, where this improved CoT prompt is applied to all samples. This baseline already achieves competitive performance, providing a strong starting point for our experiments.
+As shown in Table聽 6 , applying our DA-CoT, which dynamically selects reasoning paths, provides a consistent performance improvement across both ReasonSeg and ReferringSeg benchmarks. Furthermore, the addition of Bidirectional Rethinking yields additional gains by enhancing the framework鈥檚 robustness. This highlights its effectiveness in resolving initial failures regardless of the specific task.
+Inference Latency Comparison. The reported inference time is measured end-to-end, encompassing all processes required for DA-CoT (e.g., attention map extraction and BiReT). All measurements were conducted on a single NVIDIA RTX 4090 GPU. As shown in Table聽 7 , DA-CoT significantly reduces latency compared to the All-CoT baseline while achieving higher performance. Furthermore, it demonstrates superior inference efficiency and overall performance compared to existing methods聽 [ 16 , 22 , 23 ] .
+Table 4 : Performance comparison on LogicVista and MMVP. We report accuracy for LogicVista and pair accuracy for MMVP.
+Method
+LogicVista
+MMVP
+Qwen2.5VL-7B聽 [ 2 ] (All-Non-CoT)
+37.81
+58.00
+Qwen2.5VL-7B聽 [ 2 ] (All-CoT)
+44.30
+55.33
+VisionReasoner-7B聽 [ 23 ]
+38.93
+56.00
+Seg-Zero-7B聽 [ 22 ]
+38.93
+58.67
+DA-CoT-7B
+45.64
+59.33
+Table 5 : Scalability and robustness of the proposed method on larger and more recent MLLMs. Performance is reported as gIoU. 鈥?/span> denotes performance re-evaluated by聽 [ 10 ] .
+Method
+ReasonSeg
+val
+test
+Avg.
+Seg-Zero-7B 鈥?/span> 聽 [ 22 ]
+62.0
+58.3
+60.2
+Seg-Zero-7B + Ours
+66.2 ( 鈫?/mo> \uparrow 4.2)
+64.6 ( 鈫?/mo> \uparrow 6.3)
+65.4 ( 鈫?/mo> \uparrow 5.2)
+VisionReasoner-7B聽 [ 23 ]
+66.3
+63.6
+65.0
+VisionReasoner-7B + Ours
+67.4 ( 鈫?/mo> \uparrow 1.1)
+65.6 ( 鈫?/mo> \uparrow 2.0)
+66.5 ( 鈫?/mo> \uparrow 1.5)
+Qwen2.5VL-7B聽 [ 2 ]
+63.0
+60.7
+61.9
+Qwen2.5VL-7B + Ours
+68.0 ( 鈫?/mo> \uparrow 5.0)
+64.6 ( 鈫?/mo> \uparrow 3.9)
+66.3 ( 鈫?/mo> \uparrow 4.4)
+Qwen2.5VL-32B聽 [ 2 ]
+63.1
+62.5
+62.8
+Qwen2.5VL-32B + Ours
+68.1 ( 鈫?/mo> \uparrow 5.0)
+64.9 ( 鈫?/mo> \uparrow 2.4)
+66.5 ( 鈫?/mo> \uparrow 3.7)
+Qwen2.5VL-72B聽 [ 2 ]
+66.6
+64.0
+65.3
+Qwen2.5VL-72B + Ours
+69.9 ( 鈫?/mo> \uparrow 3.3)
+68.0 ( 鈫?/mo> \uparrow 4.0)
+69.0 ( 鈫?/mo> \uparrow 3.7)
+Qwen3VL-8B聽 [ 1 ]
+67.9
+67.4
+67.7
+Qwen3VL-8B + Ours
+69.2 ( 鈫?/mo> \uparrow 1.3)
+69.1 ( 鈫?/mo> \uparrow 1.7)
+69.2 ( 鈫?/mo> \uparrow 1.5)
+GLM4.1V-9B聽 [ 9 ]
+66.5
+63.5
+65.0
+GLM4.1V-9B + Ours
+68.4 ( 鈫?/mo> \uparrow 1.9)
+66.7 ( 鈫?/mo> \uparrow 3.2)
+67.6 ( 鈫?/mo> \uparrow 2.6)
+Analysis of Thresholding Strategy. We compared several thresholding strategies, as shown in Table聽 8 . While adaptive CoT triggering proved more effective than both All-CoT and All-Non-CoT, our proposed second elbow strategy yielded the best performance. This result indicates that our approach finds an optimal balance between performance and efficiency, as it most effectively curtails unnecessary CoT usage while maximizing accuracy.
+Transfer Across Proxy Sources.
+The layers and threshold in all experiments are determined once on the default proxy and reused across every benchmark without re-determination.
+To verify that this reuse does not depend on the proxy being drawn from segmentation data, we construct proxy sets of 1,000 image鈥搎uery pairs from the validation splits of OK-VQA聽 [ 26 ] and GQA聽 [ 11 ] , and the training split of A-OKVQA聽 [ 33 ] , and apply the identical determination procedure of Sec.聽 4.2 .
+As shown in Table聽 9 , all sources select overlapping mid-to-late layers with thresholds 蟿 鈭?/mo> [ 6.00 , 6.21 ] \tau\in[6.00,6.21] , and every configuration outperforms both All-CoT and All-Non-CoT on every benchmark.
+The transfer also holds in the reverse direction: the Default row applies the segmentation-determined parameters unchanged to LogicVista and MMVP, matching Table聽 4 .
+These results indicate that the parameters reflect an intrinsic property of the backbone rather than the source from which the proxy is drawn.
+Analysis of Aggregated Layers. We also investigated the optimal number of layers ( k k ) to aggregate for our difficulty signal. As shown in Table聽 10 , aggregating information from multiple layers led to more stable performance than relying on a single one, with both k = 3 k=3 and k = 4 k=4 showing competitive performance. However, k = 3 k=3 was the optimal choice when considering the performance of the full model with Bidirectional Rethinking applied. We therefore adopted k = 3 k=3 for all experiments.
+Table 6 :
+Ablation study on our proposed components:
+DA-CoT and BiReT. The baseline applies the CoT prompt to all samples.
+Method
+ReasonSeg (gIoU)
+ReferringSeg (cIoU)
+val
+test
+RefCOCO
+RefCOCO+
+RefCOCOg
+Qwen2.5VL-7B
+63.0
+60.7
+73.5
+68.2
+60.4
++ DA-CoT
+65.2 ( 鈫?/mo> \uparrow 2.2)
+64.0 ( 鈫?/mo> \uparrow 3.3)
+77.6 ( 鈫?/mo> \uparrow 4.1)
+72.0 ( 鈫?/mo> \uparrow 3.8)
+69.6 ( 鈫?/mo> \uparrow 9.2)
+BiReT
+68.0 ( 鈫?/mo> \uparrow 2.8)
+64.6 ( 鈫?/mo> \uparrow 0.6)
+77.7 ( 鈫?/mo> \uparrow 0.1)
+72.4 ( 鈫?/mo> \uparrow 0.4)
+70.7 ( 鈫?/mo> \uparrow 1.1)
+Table 7 : Inference latency and performance on the ReasonSeg test. All-CoT and All-Non-CoT denote applying CoT or direct prediction to all samples, respectively.
+Method
+time/img (sec)
+gIoU (Test)
+LISA-7B聽 [ 16 ]
+7.0
+48.7
+Seg-Zero-7B聽 [ 22 ]
+7.0
+58.3
+VisionReasoner-7B聽 [ 23 ]
+7.0
+63.6
+Qwen2.5VL-7B聽 [ 2 ] (All-Non-CoT)
+3.2
+58.0
+Qwen2.5VL-7B聽 [ 2 ] (All-CoT)
+9.9
+60.7
+DA-CoT-7B (w/o BiReT)
+4.4
+64.0
+DA-CoT-7B (w/ BiReT)
+4.7
+64.6
+Table 8 : Ablation study on entropy threshold selection for ReasonSeg without Bidirectional Rethinking. Reported in gIoU.
+Threshold Strategy
+val
+test
+CoT Usage (%)
+All-CoT
+63.0
+60.7
+100.0
+First Elbow
+63.9
+61.0
+76.1
+Median
+64.6
+61.9
+51.6
+Second Elbow
+65.2
+64.0
+35.0
+All-Non-CoT
+59.9
+58.0
+0.0
+Effectiveness of Strategy Flipping in BiReT.
+To further validate the design of BiReT, we analyze whether its performance gain stems merely from taking an additional inference attempt or from the explicit strategy flipping mechanism.
+To this end, we compare BiReT against a fixed-strategy retry baseline, termed Unidirectional Rethinking ( UniReT ), which re-generates outputs without strategy switching (i.e., CoT 鈫?/mo> \rightarrow CoT or Non-CoT 鈫?/mo> \rightarrow Non-CoT). Following common evaluation practice, all methods in our experiments use deterministic decoding unless otherwise noted, meaning that the same input under the same model and prompt yields a single fixed output. UniReT departs from this default only during the fallback phase by re-decoding the same reasoning mode under varying temperatures t 鈭?/mo> { 0.5 , 0.7 , 1.0 } t\in\{0.5,0.7,1.0\} . Changing the temperature alters the token sampling distribution, so repeated runs on the same input can produce different reasoning traces and final predictions; we therefore report results averaged over 3 runs. We evaluate the effectiveness using the Valid Recovery Rate , defined as the proportion of initially failed samples that successfully yield a valid response after the fallback phase, and the Correct Recovery Rate , the proportion of initially failed samples whose recovered prediction achieves IoU > > 0.5.
+As shown in Table聽 11 , UniReT peaks at 38.7% Valid Recovery Rate and at most a 2.8% Correct Recovery Rate, whereas BiReT achieves 97.2% and 22.2%, respectively, with the larger overall gain.
+These results indicate that the key advantage of BiReT does not come merely from an additional retry, but from explicitly flipping the reasoning strategy. By switching reasoning modes, BiReT forces the model to approach the query from an entirely fresh perspective, and it is this flip, rather than resampling, that produces the correct recoveries.
+Further details regarding BiReT can be found in the Supplementary Material (Sec.聽 C ).
+Table 9 : Transfer of the selected layers and threshold across proxy sources. Parameters determined on each source via the procedure of Sec.聽 4.2 are fixed and directly applied to all benchmarks.
+Method
+Selected Layers
+Threshold ( 蟿 \tau )
+ReasonSeg (gIoU)
+LogicVista
+MMVP
+val
+test
+Avg.
+Qwen2.5VL-7B聽 [ 2 ] (All-Non-CoT)
+59.9
+58.0
+59.0
+37.81
+58.00
+Qwen2.5VL-7B聽 [ 2 ] (All-CoT)
+63.0
+60.7
+61.9
+44.30
+55.33
+DA-CoT (default)
+23, 24, 25
+6.21
+68.0
+64.6
+66.3
+45.64
+59.33
+DA-CoT (OK-VQA 聽 [ 26 ] )
+16, 24, 25
+6.14
+67.2
+65.0
+66.1
+44.52
+62.00
+DA-CoT (A-OKVQA 聽 [ 33 ] )
+16, 23, 25
+6.07
+66.8
+64.7
+65.8
+45.86
+61.33
+DA-CoT (GQA 聽 [ 11 ] )
+24, 25, 28
+6.00
+67.7
+64.5
+66.1
+46.31
+62.00
+Table 10 : Ablation study on the number of layers k k without Bidirectional Rethinking.
+ReasonSeg
+k = 1 k=1
+k = 2 k=2
+k = 3 k=3
+k = 4 k=4
+k = 5 k=5
+val
+64.4
+64.1
+65.2
+66.4
+63.9
+test
+63.4
+63.5
+64.0
+63.9
+62.2
+selected layers
+23, 25
+23-25
+23-26
+22-26
+Table 11 : Comparison of recovery behavior and performance change on the ReasonSeg test set.
+Method
+UniReT ( t t =0.5)
+UniReT ( t t =0.7)
+UniReT ( t t =1.0)
+BiReT (Ours)
+Valid Recovery Rate
+35.4%
+38.7%
+35.5%
+97.2%
+Correct Recovery Rate
+0.9%
+2.8%
+2.8%
+22.2%
+螖 \Delta gIoU
++0.1
++0.1
++0.1
++0.6
+6 Conclusion
+This work reveals that indiscriminate CoT prompting induces 鈥渙verthinking鈥? a critical factor that impairs the visual grounding of MLLMs.
+To address this, we propose DA-CoT, a novel training-free framework that selectively triggers CoT by leveraging attention entropy as an intrinsic difficulty signal.
+Enhanced with a Bidirectional Rethinking mechanism for improved robustness, our approach achieves strong performance on reasoning segmentation and generalizes to referring segmentation.
+Furthermore, by bypassing unnecessary reasoning steps, DA-CoT substantially reduces inference latency. Its high compatibility ensures broad applicability across diverse MLLM architectures.
+This work thus suggests a path toward more intelligent MLLMs that can self-reflect on their own cognitive state and, in turn, adaptively adjust their reasoning strategy.
+7 Acknowledgments
+This work was supported by the National Research Foundation (NRF) grant funded by the Korea government (MSIT) [RS-2025-00562400] and [RS-2022-NR068754]. The authors acknowledge the Urban Big Data and AI Institute of the University of Seoul supercomputing resources (http://ubai.uos.ac.kr) made available for conducting the research reported in this paper.
+References
+[1]
+Shuai Bai, Yuxuan Cai, Ruizhe Chen, Keqin Chen, Xionghui Chen, Zesen Cheng, Lianghao Deng, Wei Ding, Chang Gao, Chunjiang Ge, et聽al.
+Qwen3-vl technical report.
+arXiv preprint arXiv:2511.21631 , 2025a.
+[2]
+Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge, Sibo Song, Kai Dang, Peng Wang, Shijie Wang, Jun Tang, et聽al.
+Qwen2. 5-vl technical report.
+arXiv preprint arXiv:2502.13923 , 2025b.
+[3]
+Nicolas Carion, Laura Gustafson, Yuan-Ting Hu, Shoubhik Debnath, Ronghang Hu, Didac Suris, Chaitanya Ryali, Kalyan聽Vasudev Alwala, Haitham Khedr, Andrew Huang, et聽al.
+Sam 3: Segment anything with concepts.
+arXiv preprint arXiv:2511.16719 , 2025.
+[4]
+Yangyi Chen, Karan Sikka, Michael Cogswell, Heng Ji, and Ajay Divakaran.
+Measuring and improving chain-of-thought reasoning in vision-language models.
+In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) , pages 192鈥?10, 2024a.
+[5]
+Yi-Chia Chen, Wei-Hua Li, Cheng Sun, Yu-Chiang聽Frank Wang, and Chu-Song Chen.
+Sam4mllm: Enhance multi-modal large language model for referring expression segmentation.
+In European Conference on Computer Vision , pages 323鈥?40. Springer, 2024b.
+[6]
+Zhenfang Chen, Qinhong Zhou, Yikang Shen, Yining Hong, Zhiqing Sun, Dan Gutfreund, and Chuang Gan.
+Visual chain-of-thought prompting for knowledge-based visual reasoning.
+In Proceedings of the AAAI Conference on Artificial Intelligence , pages 1254鈥?262, 2024c.
+[7]
+Tianyuan Du, Haopeng Li, Zhen Fan, Jiarui Zhang, Panwang Pan, and Yang Zhang.
+Sam-veteran: An mllm-based human-like sam agent for reasoning segmentation.
+In The Fourteenth International Conference on Learning Representations , 2026.
+[8]
+Jun Gao, Yongqi Li, Ziqiang Cao, and Wenjie Li.
+Interleaved-modal chain-of-thought.
+In Proceedings of the Computer Vision and Pattern Recognition Conference , pages 19520鈥?9529, 2025.
+[9]
+Wenyi Hong, Wenmeng Yu, Xiaotao Gu, Guo Wang, Guobing Gan, Haomiao Tang, Jiale Cheng, Ji Qi, Junhui Ji, Lihang Pan, et聽al.
+Glm-4.5 v and glm-4.1 v-thinking: Towards versatile multimodal reasoning with scalable reinforcement learning.
+arXiv preprint arXiv:2507.01006 , 2025.
+[10]
+Jiaqi Huang, Zunnan Xu, Jun Zhou, Ting Liu, Yicheng Xiao, Mingwen Ou, Bowen Ji, Xiu Li, and Kehong Yuan.
+Sam-r1: Leveraging sam for reward feedback in multimodal segmentation via reinforcement learning.
+arXiv preprint arXiv:2505.22596 , 2025.
+[11]
+Drew聽A. Hudson and Christopher聽D. Manning.
+GQA: A new dataset for real-world visual reasoning and compositional question answering.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 6700鈥?709, 2019.
+[12]
+Seil Kang, Jinyeong Kim, Junhyeok Kim, and Seong聽Jae Hwang.
+Your large vision-language model only needs A few attention heads for visual grounding.
+In IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2025, Nashville, TN, USA, June 11-15, 2025 , pages 9339鈥?350. Computer Vision Foundation / IEEE, 2025.
+[13]
+Shiu-hong Kao, Yu-Wing Tai, and Chi-Keung Tang.
+Think before you segment: High-quality reasoning segmentation with gpt chain of thoughts.
+arXiv preprint arXiv:2503.07503 , 2025.
+[14]
+Sahar Kazemzadeh, Vicente Ordonez, Mark Matten, and Tamara Berg.
+Referitgame: Referring to objects in photographs of natural scenes.
+In Proceedings of the 2014 conference on empirical methods in natural language processing (EMNLP) , pages 787鈥?98, 2014.
+[15]
+Alexander Kirillov, Eric Mintun, Nikhila Ravi, Hanzi Mao, Chloe Rolland, Laura Gustafson, Tete Xiao, Spencer Whitehead, Alexander聽C Berg, Wan-Yen Lo, et聽al.
+Segment anything.
+In Proceedings of the IEEE/CVF international conference on computer vision , pages 4015鈥?026, 2023.
+[16]
+Xin Lai, Zhuotao Tian, Yukang Chen, Yanwei Li, Yuhui Yuan, Shu Liu, and Jiaya Jia.
+Lisa: Reasoning segmentation via large language model.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 9579鈥?589, 2024.
+[17]
+Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi.
+Blip-2: Bootstrapping language-image pre-training with frozen image encoders and large language models.
+In International conference on machine learning , pages 19730鈥?9742. PMLR, 2023.
+[18]
+Feng Liang, Bichen Wu, Xiaoliang Dai, Kunpeng Li, Yinan Zhao, Hang Zhang, Peizhao Zhang, Peter Vajda, and Diana Marculescu.
+Open-vocabulary semantic segmentation with mask-adapted clip.
+In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 7061鈥?070, 2023.
+[19]
+Chang Liu, Henghui Ding, and Xudong Jiang.
+Gres: Generalized referring expression segmentation.
+In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 23592鈥?3601, 2023a.
+[20]
+Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong聽Jae Lee.
+Visual instruction tuning.
+Advances in neural information processing systems , 36:34892鈥?4916, 2023b.
+[21]
+Haotian Liu, Chunyuan Li, Yuheng Li, and Yong聽Jae Lee.
+Improved baselines with visual instruction tuning.
+In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 26296鈥?6306, 2024.
+[22]
+Yuqi Liu, Bohao Peng, Zhisheng Zhong, Zihao Yue, Fanbin Lu, Bei Yu, and Jiaya Jia.
+Seg-zero: Reasoning-chain guided segmentation via cognitive reinforcement.
+arXiv preprint arXiv:2503.06520 , 2025a.
+[23]
+Yuqi Liu, Tianyuan Qu, Zhisheng Zhong, Bohao Peng, Shu Liu, Bei Yu, and Jiaya Jia.
+Visionreasoner: Unified visual perception and reasoning via reinforcement learning.
+arXiv preprint arXiv:2505.12081 , 2025b.
+[24]
+Pan Lu, Swaroop Mishra, Tanglin Xia, Liang Qiu, Kai-Wei Chang, Song-Chun Zhu, Oyvind Tafjord, Peter Clark, and Ashwin Kalyan.
+Learn to explain: Multimodal reasoning via thought chains for science question answering.
+Advances in Neural Information Processing Systems , 35:2507鈥?521, 2022.
+[25]
+Yi Lu, Jiawang Cao, Yongliang Wu, Bozheng Li, Licheng Tang, Yangguang Ji, Chong Wu, Jay Wu, and Wenbo Zhu.
+Rsvp: Reasoning segmentation via visual prompting and multi-modal chain-of-thought.
+arXiv preprint arXiv:2506.04277 , 2025.
+[26]
+Kenneth Marino, Mohammad Rastegari, Ali Farhadi, and Roozbeh Mottaghi.
+OK-VQA: A visual question answering benchmark requiring external knowledge.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 3195鈥?204, 2019.
+[27]
+Minheng Ni, Yabo Zhang, Kailai Feng, Xiaoming Li, Yiwen Guo, and Wangmeng Zuo.
+Ref-diff: Zero-shot referring image segmentation with generative models.
+CoRR , abs/2308.16777, 2023.
+[28]
+Renjie Pi, Lewei Yao, Jiahui Gao, Jipeng Zhang, and Tong Zhang.
+Perceptiongpt: Effectively fusing visual perception into llm.
+In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 27124鈥?7133, 2024.
+[29]
+Nikhila Ravi, Valentin Gabeur, Yuan-Ting Hu, Ronghang Hu, Chaitanya Ryali, Tengyu Ma, Haitham Khedr, Roman R盲dle, Chloe Rolland, Laura Gustafson, et聽al.
+Sam 2: Segment anything in images and videos.
+arXiv preprint arXiv:2408.00714 , 2024.
+[30]
+Tianhe Ren, Shilong Liu, Ailing Zeng, Jing Lin, Kunchang Li, He Cao, Jiayu Chen, Xinyu Huang, Yukang Chen, Feng Yan, et聽al.
+Grounded sam: Assembling open-world models for diverse visual tasks.
+arXiv preprint arXiv:2401.14159 , 2024a.
+[31]
+Zhongwei Ren, Zhicheng Huang, Yunchao Wei, Yao Zhao, Dongmei Fu, Jiashi Feng, and Xiaojie Jin.
+Pixellm: Pixel reasoning with large multimodal model.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 26374鈥?6383, 2024b.
+[32]
+Ville Satopaa, Jeannie Albrecht, David Irwin, and Barath Raghavan.
+Finding a鈥?kneedle鈥?in a haystack: Detecting knee points in system behavior.
+In 2011 31st international conference on distributed computing systems workshops , pages 166鈥?71. IEEE, 2011.
+[33]
+Dustin Schwenk, Apoorv Khandelwal, Christopher Clark, Kenneth Marino, and Roozbeh Mottaghi.
+A-OKVQA: A benchmark for visual question answering using world knowledge.
+In Computer Vision 鈥?ECCV 2022 , pages 146鈥?62. Springer, 2022.
+[34]
+Hao Shao, Shengju Qian, Han Xiao, Guanglu Song, Zhuofan Zong, Letian Wang, Yu Liu, and Hongsheng Li.
+Visual cot: Unleashing chain-of-thought reasoning in multi-modal language models.
+CoRR , 2024.
+[35]
+Zayne Sprague, Fangcong Yin, Juan聽Diego Rodriguez, Dongwei Jiang, Manya Wadhwa, Prasann Singhal, Xinyu Zhao, Xi Ye, Kyle Mahowald, and Greg Durrett.
+To cot or not to cot? chain-of-thought helps mainly on math and symbolic reasoning.
+arXiv preprint arXiv:2409.12183 , 2024.
+[36]
+Yucheng Suo, Linchao Zhu, and Yi Yang.
+Text augmented spatial aware zero-shot referring image segmentation.
+In Findings of the Association for Computational Linguistics: EMNLP 2023, Singapore, December 6-10, 2023 , pages 1032鈥?043. Association for Computational Linguistics, 2023.
+[37]
+Xinyu Tian, Shu Zou, Zhaoyuan Yang, Mengqi He, Fabian Waschkowski, Lukas Wesemann, Peter Tu, and Jing Zhang.
+More thought, less accuracy? on the dual nature of reasoning in vision-language models.
+In International Conference on Learning Representations , pages 133928鈥?33965, 2026.
+[38]
+Shengbang Tong, Zhuang Liu, Yuexiang Zhai, Yi Ma, Yann LeCun, and Saining Xie.
+Eyes wide shut? exploring the visual shortcomings of multimodal llms.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 9568鈥?578, 2024.
+[39]
+Yuji Wang, Jingchen Ni, Yong Liu, Chun Yuan, and Yansong Tang.
+Iterprime: Zero-shot referring image segmentation with iterative grad-cam refinement and primary word emphasis.
+In AAAI-25, Sponsored by the Association for the Advancement of Artificial Intelligence, February 25 - March 4, 2025, Philadelphia, PA, USA , pages 8159鈥?168. AAAI Press, 2025.
+[40]
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc聽V Le, Denny Zhou, et聽al.
+Chain-of-thought prompting elicits reasoning in large language models.
+Advances in neural information processing systems , 35:24824鈥?4837, 2022.
+[41]
+Yijia Xiao, Edward Sun, Tianyu Liu, and Wei Wang.
+Logicvista: Multimodal llm logical reasoning benchmark in visual contexts, 2024.
+[42]
+Mayi Xu, Yongqi Li, Ke Sun, and Tieyun Qian.
+Adaption-of-thought: Learning question difficulty improves large language models for reasoning.
+In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 5468鈥?495, 2024.
+[43]
+Zhao Yang, Jiaqi Wang, Yansong Tang, Kai Chen, Hengshuang Zhao, and Philip聽HS Torr.
+Lavt: Language-aware vision transformer for referring image segmentation.
+In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 18155鈥?8165, 2022.
+[44]
+Licheng Yu, Patrick Poirson, Shan Yang, Alexander聽C Berg, and Tamara聽L Berg.
+Modeling context in referring expressions.
+In European conference on computer vision , pages 69鈥?5. Springer, 2016.
+[45]
+Seonghoon Yu, Paul聽Hongsuck Seo, and Jeany Son.
+Zero-shot referring image segmentation with global-local context features.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 19456鈥?9465, 2023.
+[46]
+Zhuoran Yu and Yong聽Jae Lee.
+How multimodal llms solve image tasks: A lens on visual grounding, task reasoning, and answer decoding.
+arXiv preprint arXiv:2508.20279 , 2025.
+[47]
+Jiarui Zhang, Mahyar Khayatkhoei, Prateek Chhikara, and Filip Ilievski.
+Mllms know where to look: Training-free perception of small visual details with multimodal llms.
+arXiv preprint arXiv:2502.17422 , 2025.
+[48]
+Zhuosheng Zhang, Aston Zhang, Mu Li, Hai Zhao, George Karypis, and Alex Smola.
+Multimodal chain-of-thought reasoning in language models.
+arXiv preprint arXiv:2302.00923 , 2023.
+[49]
+Denny Zhou, Nathanael Sch盲rli, Le Hou, Jason Wei, Nathan Scales, Xuezhi Wang, Dale Schuurmans, Claire Cui, Olivier Bousquet, Quoc Le, et聽al.
+Least-to-most prompting enables complex reasoning in large language models.
+arXiv preprint arXiv:2205.10625 , 2022.
+Attention Maps Know When to Think:
+Training-Free Difficulty-Aware Chain-of-Thought
+for Reasoning Segmentation
+Supplementary Material
+This supplementary material provides comprehensive details and extended results that complement the main paper.
+Section聽 A details the structured CoT prompt design and its baseline validation, provides the complete mathematical formulation of the elbow detection procedure, analyzes the validity of our entropy formulation, and presents the complete DA-CoT determination and inference algorithm with Bidirectional Rethinking.
+Section聽 B presents extended experimental results, including layer and threshold configurations across various MLLMs, the robustness of DA-CoT to proxy-set construction and in proxy-set-free environments, and a target-size control for the per-sample analysis of Sec.聽 3.2 .
+Section聽 C analyzes the Bidirectional Rethinking (BiReT) mechanism, detailing its rule-based failure detection logic, recovery behavior, and overall computational efficiency.
+Section聽 D offers extensive qualitative analyses, featuring additional CoT-beneficial and CoT-detrimental examples, a quantitative breakdown of CoT-induced failure modes, evidence of overthinking in CoT-optimized models, and an examination of DA-CoT鈥檚 limitations in 鈥渃onfidently wrong鈥?scenarios.
+A Methodological Details
+A.1 CoT Prompt Design and Baseline Validation
+This section provides a detailed description of the Chain-of-Thought (CoT) prompt used in our experiments and validates its effectiveness. Inspired by prior work聽 [ 49 ] that decomposes complex problems into smaller, manageable steps, we designed a structured prompt to systematically guide the model鈥檚 reasoning process. The exact prompt used is shown in Figure聽 6 .
+To quantitatively demonstrate the efficacy of this structured CoT prompt, we compared two all-sample settings: answering all samples without CoT prompting (All-Non-CoT) and answering all samples with our structured CoT prompt (All-CoT).
+As shown in Table聽 12 , our structured CoT prompt consistently achieves higher performance than the All-Non-CoT baseline across all benchmarks. This indicates that a well-designed prompt, in itself, significantly enhances the reasoning capabilities of MLLMs and can serve as a powerful performance foundation.
+Consequently, we establish the 鈥淎ll-CoT鈥?result as a strong baseline for evaluating our proposed DA-CoT framework. The goal of DA-CoT, as presented in the main paper, is to surpass this strong baseline by selectively avoiding unnecessary CoT application, thereby preventing 鈥渙verthinking鈥?and simultaneously improving both efficiency and accuracy.
+Figure 6 : CoT prompt for DA-CoT
+Table 12 :
+Quantitative validation of the structured CoT prompt design. Performance of the Qwen2.5VL-7B model is reported.
+Method
+ReasonSeg (gIoU)
+ReferringSeg (cIoU)
+val
+test
+RefCOCO
+RefCOCO+
+RefCOCOg
+All-Non-CoT
+59.9
+58.0
+63.2
+58.0
+57.2
+All-CoT
+63.0
+60.7
+73.5
+68.2
+60.4
+A.2 Elbow Detection Algorithm
+In Section聽 4 , we compute the aggregated attention entropy for each sample by averaging the attention entropy obtained from the selected layer set 鈩?/mi> \mathcal{L} , where the layers are chosen based on having the largest variance in attention entropy. Let x i x_{i} denote the i i -th sample in the proxy set 饾挓 proxy \mathcal{D}_{\text{proxy}} . The aggregated attention entropy is defined as:
+鈩?/mi> agg 鈥?/mo> ( x i ) = 1 k 鈥?/mo> 鈭?/mo> 鈩?/mi> 鈭?/mo> 鈩?/mi> 鈩?/mi> attn ( 鈩?/mi> ) 鈥?/mo> ( x i ) , \mathcal{H}_{\text{agg}}(x_{i})=\frac{1}{k}\sum_{\ell\in\mathcal{L}}\mathcal{H}_{\text{attn}}^{(\ell)}(x_{i}),
+(1)
+where k = | 鈩?/mi> | k=|\mathcal{L}| denotes the number of selected layers.
+After computing the aggregated attention entropy for all samples in the proxy set 饾挓 proxy \mathcal{D}_{\text{proxy}} , we sort them in ascending order to obtain the sorted attention entropy sequence. Let h i h_{i} denote the i i -th smallest value of 鈩?/mi> agg 鈥?/mo> ( x ) \mathcal{H}_{\text{agg}}(x) among all samples x 鈭?/mo> 饾挓 proxy x\in\mathcal{D}_{\text{proxy}} :
+h 1 鈮?/mo> h 2 鈮?/mo> 鈰?/mo> 鈮?/mo> h N , N = | 饾挓 proxy | . h_{1}\leq h_{2}\leq\cdots\leq h_{N},\quad N=|\mathcal{D}_{\text{proxy}}|.
+(2)
+We empirically observe that the second elbow point of the sorted attention entropy sequence serves as an effective threshold. To detect this second elbow, we first draw a straight line L L connecting the first point ( 1 , h 1 ) (1,h_{1}) and the last point ( N , h N ) (N,h_{N}) . We then compute the perpendicular distance d i d_{i} from each point ( i , h i ) (i,h_{i}) to this line:
+d i = | ( N 鈭?/mo> 1 ) 鈥?/mo> ( h i 鈭?/mo> h 1 ) 鈭?/mo> ( i 鈭?/mo> 1 ) 鈥?/mo> ( h N 鈭?/mo> h 1 ) | ( N 鈭?/mo> 1 ) 2 + ( h N 鈭?/mo> h 1 ) 2 . d_{i}=\frac{|(N-1)(h_{i}-h_{1})-(i-1)(h_{N}-h_{1})|}{\sqrt{(N-1)^{2}+(h_{N}-h_{1})^{2}}}.
+(3)
+The index that maximizes this perpendicular distance corresponds to the first elbow :
+i first = argmax i 鈭?/mo> { 1 , 鈥?/mi> , N } 鈥?/mo> d i . i_{\text{first}}=\underset{i\in\{1,\ldots,N\}}{\mathrm{argmax}}\,d_{i}.
+(4)
+To obtain the second elbow point, we apply the same elbow-detection procedure to the tail subsequence { h i first + 1 , 鈥?/mi> , h N } \{h_{i_{\text{first}}+1},\ldots,h_{N}\} . Specifically, we compute the perpendicular distance d j 鈥?/mo> d_{j}^{\prime} from each point to the line connecting ( 1 , h i first + 1 ) (1,h_{i_{\text{first}}+1}) and ( N 鈭?/mo> i first , h N ) (N-i_{\text{first}},h_{N}) , and determine the index that maximizes this distance:
+i second = i first + argmax j 鈭?/mo> { 1 , 鈥?/mi> , N 鈭?/mo> i first } 鈥?/mo> d j 鈥?/mo> . i_{\text{second}}=i_{\text{first}}+\underset{j\in\{1,\ldots,N-i_{\text{first}}\}}{\mathrm{argmax}}\,d_{j}^{\prime}.
+(5)
+Finally, the entropy threshold is set to the second elbow value:
+蟿 = h i second . \tau=h_{i_{\text{second}}}.
+(6)
+A.3 Validity of the Entropy Formulation
+Our pipeline computes, for each layer 鈩?/mi> \ell , the head-averaged attention
+饾悮 ( 鈩?/mi> ) = 1 H 鈥?/mo> 鈭?/mo> h = 1 H 饾悮 h ( 鈩?/mi> ) \mathbf{a}^{(\ell)}=\frac{1}{H}\sum_{h=1}^{H}\mathbf{a}^{(\ell)}_{h}
+and its Shannon entropy 鈩?/mi> attn ( 鈩?/mi> ) \mathcal{H}^{(\ell)}_{\text{attn}} , then averages
+these per-layer entropy values across the selected layers 鈩?/mi> \mathcal{L} as
+鈩?/mi> agg = 1 k 鈥?/mo> 鈭?/mo> 鈩?/mi> 鈭?/mo> 鈩?/mi> 鈩?/mi> attn ( 鈩?/mi> ) \mathcal{H}_{\text{agg}}=\frac{1}{k}\sum_{\ell\in\mathcal{L}}\mathcal{H}^{(\ell)}_{\text{attn}} .
+Each per-head attention vector 饾悮 h ( 鈩?/mi> ) \mathbf{a}^{(\ell)}_{h} , obtained by softmax,
+satisfies 鈭?/mo> i = 1 N vis 饾悮 h ( 鈩?/mi> ) 鈥?/mo> [ i ] = 1 \sum_{i=1}^{N_{\text{vis}}}\mathbf{a}^{(\ell)}_{h}[i]=1 by
+construction. Since 饾悮 ( 鈩?/mi> ) \mathbf{a}^{(\ell)} is a convex combination of these
+valid probability distributions, it also satisfies
+鈭?/mo> i = 1 N vis 饾悮 ( 鈩?/mi> ) 鈥?/mo> [ i ] = 1 \sum_{i=1}^{N_{\text{vis}}}\mathbf{a}^{(\ell)}[i]=1 , ensuring that
+鈩?/mi> attn ( 鈩?/mi> ) \mathcal{H}^{(\ell)}_{\text{attn}} is well-defined. Crucially,
+鈩?/mi> agg \mathcal{H}_{\text{agg}} averages entropy scalars across layers
+rather than probability distributions, so no cross-layer distribution
+mixing occurs.
+We also consider an alternative per-head formulation that computes entropy before aggregating across attention heads:
+鈩?/mi> per-head ( 鈩?/mi> ) \displaystyle\mathcal{H}^{(\ell)}_{\text{per-head}}
+= 1 H 鈥?/mo> 鈭?/mo> h = 1 H 鈩?/mi> attn , h ( 鈩?/mi> ) , \displaystyle=\frac{1}{H}\sum_{h=1}^{H}\mathcal{H}^{(\ell)}_{\text{attn},h},
+(7)
+鈩?/mi> attn , h ( 鈩?/mi> ) \displaystyle\mathcal{H}^{(\ell)}_{\text{attn},h}
+= 鈭?/mo> 鈭?/mo> i = 1 N vis 饾悮 ( 鈩?/mi> ) h [ i ] log 饾悮 ( 鈩?/mi> ) h [ i ] . \displaystyle=-\sum_{i=1}^{N_{\text{vis}}}\mathbf{a}^{(\ell)}_{h}[i]\log\mathbf{a}^{(\ell)}_{h}[i].
+Here, Shannon entropy is computed separately for each per-head softmax distribution, and the resulting entropy values are then averaged across heads. As shown in Table聽 13 , this formulation selects the same layers and yields a similar threshold and comparable performance to our default formulation, indicating that the entropy signal is robust to the choice of aggregation scheme.
+A.4 DA-CoT Algorithm
+Algorithm聽 1 summarizes the complete
+determination and inference procedure of DA-CoT. Determination is
+performed once for each MLLM backbone using only unlabeled
+image鈥搎uery pairs. The resulting layer set 鈩?/mi> \mathcal{L} and
+entropy threshold 蟿 \tau are then fixed and reused across all
+downstream datasets.
+In our primary configuration, the MLLM 鈩?/mi> \mathcal{M} is
+Qwen2.5-VL-7B, the mask generator 饾挳 \mathcal{S} is SAM聽2.1
+with the Hiera-Large backbone, and the proxy set
+饾挓 proxy \mathcal{D}_{\mathrm{proxy}} contains 1,000 unlabeled
+image鈥搎uery pairs.
+饾挮 CoT 鈥?/mo> ( 鈰?/mo> ) \mathcal{P}_{\mathrm{CoT}}(\cdot) and
+饾挮 NonCoT 鈥?/mo> ( 鈰?/mo> ) \mathcal{P}_{\mathrm{NonCoT}}(\cdot) are given in
+Sec.聽A.1.
+Algorithm 1 DA-CoT Determination and Inference with Bidirectional Rethinking
+MLLM 鈩?/mi> \mathcal{M} ;
+segmentor 饾挳 \mathcal{S} ;
+unlabeled proxy set 饾挓 proxy \mathcal{D}_{\mathrm{proxy}} ;
+k = 3 k=3 ; CoT and Non-CoT prompts
+饾挮 CoT \mathcal{P}_{\mathrm{CoT}} and
+饾挮 NonCoT \mathcal{P}_{\mathrm{NonCoT}}
+Predicted segmentation mask M ^ \hat{M} or
+Failure
+One-time determination
+for all x 鈭?/mo> 饾挓 proxy x\in\mathcal{D}_{\mathrm{proxy}} do
+鈥冣€?span id="alg1.l5.3" class="ltx_text ltx_font_bold">for all transformer layers 鈩?/mi> \ell do
+鈥冣€冣€?math id="alg1.l6.m1" class="ltx_Math" alttext="\mathcal{H}_{\mathrm{attn}}^{(\ell)}(x)\leftarrow\textsc{AttentionEntropy}(\mathcal{M},x,\ell)" display="inline" intent=":literal"> 鈩?/mi> attn ( 鈩?/mi> ) 鈥?/mo> ( x ) 鈫?/mo> AttentionEntropy 鈥?/mo> ( 鈩?/mi> , x , 鈩?/mi> ) \mathcal{H}_{\mathrm{attn}}^{(\ell)}(x)\leftarrow\textsc{AttentionEntropy}(\mathcal{M},x,\ell)
+鈥冣€?span id="alg1.l7.3" class="ltx_text ltx_font_bold">end for
+end for
+鈩?/mi> 鈫?/mo> TopK 鈩?/mi> 鈦?/mo> ( Var x 鈭?/mo> 饾挓 proxy 鈦?/mo> [ 鈩?/mi> attn ( 鈩?/mi> ) 鈥?/mo> ( x ) ] , k ) \mathcal{L}\leftarrow\operatorname{TopK}_{\ell}\!\left(\operatorname{Var}_{x\in\mathcal{D}_{\mathrm{proxy}}}[\mathcal{H}_{\mathrm{attn}}^{(\ell)}(x)],k\right)
+10:
+for all x 鈭?/mo> 饾挓 proxy x\in\mathcal{D}_{\mathrm{proxy}} do
+11:
+鈥冣€?math id="alg1.l11.m1" class="ltx_Math" alttext="\mathcal{H}_{\mathrm{agg}}(x)\leftarrow\frac{1}{k}\sum_{\ell\in\mathcal{L}}\mathcal{H}_{\mathrm{attn}}^{(\ell)}(x)" display="inline" intent=":literal"> 鈩?/mi> agg 鈥?/mo> ( x ) 鈫?/mo> 1 k 鈥?/mo> 鈭?/mo> 鈩?/mi> 鈭?/mo> 鈩?/mi> 鈩?/mi> attn ( 鈩?/mi> ) 鈥?/mo> ( x ) \mathcal{H}_{\mathrm{agg}}(x)\leftarrow\frac{1}{k}\sum_{\ell\in\mathcal{L}}\mathcal{H}_{\mathrm{attn}}^{(\ell)}(x)
+12:
+end for
+13:
+蟿 鈫?/mo> SecondElbow 鈥?/mo> ( sort 鈫?/mo> 鈦?/mo> { 鈩?/mi> agg 鈥?/mo> ( x ) : x 鈭?/mo> 饾挓 proxy } ) \tau\leftarrow\textsc{SecondElbow}(\operatorname{sort}_{\uparrow}\{\mathcal{H}_{\mathrm{agg}}(x):x\in\mathcal{D}_{\mathrm{proxy}}\})
+14:
+15:
+Per-sample inference
+16:
+Receive image鈥搎uery pair x 鈰?/mo> = ( I 鈰?/mo> , q 鈰?/mo> ) x^{\star}=(I^{\star},q^{\star})
+17:
+鈩?/mi> agg 鈥?/mo> ( x 鈰?/mo> ) 鈫?/mo> 1 k 鈥?/mo> 鈭?/mo> 鈩?/mi> 鈭?/mo> 鈩?/mi> AttentionEntropy 鈥?/mo> ( 鈩?/mi> , x 鈰?/mo> , 鈩?/mi> ) \mathcal{H}_{\mathrm{agg}}(x^{\star})\leftarrow\frac{1}{k}\sum_{\ell\in\mathcal{L}}\textsc{AttentionEntropy}(\mathcal{M},x^{\star},\ell)
+18:
+if 鈩?/mi> agg 鈥?/mo> ( x 鈰?/mo> ) 鈮?/mo> 蟿 \mathcal{H}_{\mathrm{agg}}(x^{\star})\geq\tau then
+19:
+鈥冣€?math id="alg1.l19.m1" class="ltx_Math" alttext="r\leftarrow\mathrm{CoT}" display="inline" intent=":literal"> r 鈫?/mo> CoT r\leftarrow\mathrm{CoT}
+20:
+else
+21:
+鈥冣€?math id="alg1.l21.m1" class="ltx_Math" alttext="r\leftarrow\mathrm{NonCoT}" display="inline" intent=":literal"> r 鈫?/mo> NonCoT r\leftarrow\mathrm{NonCoT}
+22:
+end if
+23:
+y 鈫?/mo> Generate 鈥?/mo> ( 鈩?/mi> , I 鈰?/mo> , 饾挮 r 鈥?/mo> ( q 鈰?/mo> ) ) y\leftarrow\textsc{Generate}(\mathcal{M},I^{\star},\mathcal{P}_{r}(q^{\star}))
+24:
+if Invalid ( y y ) then
+鈯?/mo> \triangleright BiReT
+25:
+鈥冣€?math id="alg1.l25.m1" class="ltx_Math" alttext="r\leftarrow\textsc{Opposite}(r)" display="inline" intent=":literal"> r 鈫?/mo> Opposite 鈥?/mo> ( r ) r\leftarrow\textsc{Opposite}(r)
+26:
+鈥冣€?math id="alg1.l26.m1" class="ltx_Math" alttext="y\leftarrow\textsc{Generate}(\mathcal{M},I^{\star},\mathcal{P}_{r}(q^{\star}))" display="inline" intent=":literal"> y 鈫?/mo> Generate 鈥?/mo> ( 鈩?/mi> , I 鈰?/mo> , 饾挮 r 鈥?/mo> ( q 鈰?/mo> ) ) y\leftarrow\textsc{Generate}(\mathcal{M},I^{\star},\mathcal{P}_{r}(q^{\star}))
+27:
+end if
+28:
+if Invalid (y) then
+29:
+鈥冣€?span id="alg1.l29.3" class="ltx_text ltx_font_bold">return Failure
+30:
+end if
+31:
+( a ^ , 鈩?/mi> , 饾挮 ) 鈫?/mo> ParseResponse 鈥?/mo> ( y ) (\hat{a},\mathcal{B},\mathcal{P})\leftarrow\textsc{ParseResponse}(y)
+32:
+M ^ 鈫?/mo> 饾挳 鈦?/mo> ( I 鈰?/mo> , 鈩?/mi> , 饾挮 ) \hat{M}\leftarrow\mathcal{S}(I^{\star};\mathcal{B},\mathcal{P})
+33:
+return M ^ \hat{M}
+A.5 Mathematical Formulation of DA-CoT
+This section provides the complete mathematical formulation of the attention-entropy signal used in DA-CoT, including attention entropy computation, layer selection, entropy aggregation, and threshold determination.
+Attention Entropy.
+For a transformer layer 鈩?/mi> \ell , let
+饾悙 sos ( 鈩?/mi> ) 鈭?/mo> 鈩?/mi> 1 脳 d \mathbf{Q}^{(\ell)}_{\mathrm{sos}}\in\mathbb{R}^{1\times d}
+denote the query vector corresponding to the <SOS> token, and let
+饾悐 vis ( 鈩?/mi> ) 鈭?/mo> 鈩?/mi> N vis 脳 d \mathbf{K}^{(\ell)}_{\mathrm{vis}}\in\mathbb{R}^{N_{\mathrm{vis}}\times d}
+denote the key matrix of the N vis N_{\mathrm{vis}} visual tokens.
+For each attention head h 鈭?/mo> { 1 , 鈥?/mi> , H } h\in\{1,\ldots,H\} , we compute the attention distribution from the <SOS> token to the visual tokens as
+饾悮 h ( 鈩?/mi> ) = softmax 鈦?/mo> ( 饾悙 sos ( 鈩?/mi> ) , h 鈥?/mo> ( 饾悐 vis ( 鈩?/mi> ) , h ) 鈯?/mo> d / H ) , \mathbf{a}^{(\ell)}_{h}=\operatorname{softmax}\left(\frac{\mathbf{Q}^{(\ell),h}_{\mathrm{sos}}\left(\mathbf{K}^{(\ell),h}_{\mathrm{vis}}\right)^{\top}}{\sqrt{d/H}}\right),
+(8)
+where 饾悮 h ( 鈩?/mi> ) 鈭?/mo> 鈩?/mi> N vis \mathbf{a}^{(\ell)}_{h}\in\mathbb{R}^{N_{\mathrm{vis}}} .
+We average the attention distributions across heads,
+饾悮 ( 鈩?/mi> ) = 1 H 鈥?/mo> 鈭?/mo> h = 1 H 饾悮 h ( 鈩?/mi> ) , \mathbf{a}^{(\ell)}=\frac{1}{H}\sum_{h=1}^{H}\mathbf{a}^{(\ell)}_{h},
+(9)
+and define the attention entropy of layer 鈩?/mi> \ell using Shannon entropy:
+鈩?/mi> attn ( 鈩?/mi> ) ( x ) = 鈭?/mo> 鈭?/mo> i = 1 N vis 饾悮 ( 鈩?/mi> ) [ i ] log 饾悮 ( 鈩?/mi> ) [ i ] . \mathcal{H}^{(\ell)}_{\mathrm{attn}}(x)=-\sum_{i=1}^{N_{\mathrm{vis}}}\mathbf{a}^{(\ell)}[i]\log\mathbf{a}^{(\ell)}[i].
+(10)
+Low entropy indicates concentrated visual attention, whereas high entropy reflects a more dispersed attention distribution.
+Entropy-Sensitive Layer Selection.
+Given an unlabeled proxy set 饾挓 proxy \mathcal{D}_{\mathrm{proxy}} , we identify the k k layers whose attention entropy varies most across samples:
+鈩?/mi> = TopK 鈩?/mi> 鈦?/mo> ( Var x 鈭?/mo> 饾挓 proxy 鈦?/mo> [ 鈩?/mi> attn ( 鈩?/mi> ) 鈥?/mo> ( x ) ] , k ) . \mathcal{L}=\operatorname{TopK}_{\ell}\left(\operatorname{Var}_{x\in\mathcal{D}_{\mathrm{proxy}}}\left[\mathcal{H}^{(\ell)}_{\mathrm{attn}}(x)\right],k\right).
+(11)
+Layers with large entropy variance are more sensitive to changes between confident and uncertain grounding behavior. In our experiments, we use k = 3 k=3 .
+Layer-Aggregated Entropy.
+For each sample x x , the entropy values from the selected layers are averaged to obtain a single difficulty score:
+鈩?/mi> agg 鈥?/mo> ( x ) = 1 k 鈥?/mo> 鈭?/mo> 鈩?/mi> 鈭?/mo> 鈩?/mi> 鈩?/mi> attn ( 鈩?/mi> ) 鈥?/mo> ( x ) . \mathcal{H}_{\mathrm{agg}}(x)=\frac{1}{k}\sum_{\ell\in\mathcal{L}}\mathcal{H}^{(\ell)}_{\mathrm{attn}}(x).
+(12)
+This scalar is subsequently used to determine whether CoT reasoning should be activated.
+Second-Elbow Threshold.
+We compute 鈩?/mi> agg 鈥?/mo> ( x ) \mathcal{H}_{\mathrm{agg}}(x) for all samples in
+饾挓 proxy \mathcal{D}_{\mathrm{proxy}} and sort the resulting values in ascending order:
+h 1 鈮?/mo> h 2 鈮?/mo> 鈰?/mo> 鈮?/mo> h N , N = | 饾挓 proxy | . h_{1}\leq h_{2}\leq\cdots\leq h_{N},\qquad N=|\mathcal{D}_{\mathrm{proxy}}|.
+(13)
+To identify the first elbow, we measure the perpendicular distance of each point ( i , h i ) (i,h_{i}) from the line connecting ( 1 , h 1 ) (1,h_{1}) and ( N , h N ) (N,h_{N}) :
+d i = | ( N 鈭?/mo> 1 ) 鈥?/mo> ( h i 鈭?/mo> h 1 ) 鈭?/mo> ( i 鈭?/mo> 1 ) 鈥?/mo> ( h N 鈭?/mo> h 1 ) | ( N 鈭?/mo> 1 ) 2 + ( h N 鈭?/mo> h 1 ) 2 . d_{i}=\frac{\left|(N-1)(h_{i}-h_{1})-(i-1)(h_{N}-h_{1})\right|}{\sqrt{(N-1)^{2}+(h_{N}-h_{1})^{2}}}.
+(14)
+The first-elbow index is then
+i first = arg 鈦?/mo> max i 鈭?/mo> { 1 , 鈥?/mi> , N } 鈦?/mo> d i . i_{\mathrm{first}}=\arg\max_{i\in\{1,\ldots,N\}}d_{i}.
+(15)
+We next apply the same procedure to the tail sequence after the first elbow.
+Let
+g j = h i first + j , j 鈭?/mo> { 1 , 鈥?/mi> , M } , M = N 鈭?/mo> i first . g_{j}=h_{i_{\mathrm{first}}+j},\qquad j\in\{1,\ldots,M\},\qquad M=N-i_{\mathrm{first}}.
+(16)
+For each point ( j , g j ) (j,g_{j}) in this subsequence, its distance from the line connecting ( 1 , g 1 ) (1,g_{1}) and ( M , g M ) (M,g_{M}) is
+d j 鈥?/mo> = | ( M 鈭?/mo> 1 ) 鈥?/mo> ( g j 鈭?/mo> g 1 ) 鈭?/mo> ( j 鈭?/mo> 1 ) 鈥?/mo> ( g M 鈭?/mo> g 1 ) | ( M 鈭?/mo> 1 ) 2 + ( g M 鈭?/mo> g 1 ) 2 . d^{\prime}_{j}=\frac{\left|(M-1)(g_{j}-g_{1})-(j-1)(g_{M}-g_{1})\right|}{\sqrt{(M-1)^{2}+(g_{M}-g_{1})^{2}}}.
+(17)
+The second-elbow index in the original sequence is
+i second = i first + arg 鈦?/mo> max j 鈭?/mo> { 1 , 鈥?/mi> , M } 鈦?/mo> d j 鈥?/mo> , i_{\mathrm{second}}=i_{\mathrm{first}}+\arg\max_{j\in\{1,\ldots,M\}}d^{\prime}_{j},
+(18)
+and the final entropy threshold is defined as
+蟿 = h i second . \tau=h_{i_{\mathrm{second}}}.
+(19)
+During inference, DA-CoT activates CoT when
+鈩?/mi> agg 鈥?/mo> ( x ) 鈮?/mo> 蟿 \mathcal{H}_{\mathrm{agg}}(x)\geq\tau and otherwise follows the direct Non-CoT path.
+Validity of the Entropy Formulation.
+Each per-head attention vector 饾悮 h ( 鈩?/mi> ) \mathbf{a}^{(\ell)}_{h} is obtained by softmax and therefore satisfies
+鈭?/mo> i = 1 N vis 饾悮 h ( 鈩?/mi> ) 鈥?/mo> [ i ] = 1 . \sum_{i=1}^{N_{\mathrm{vis}}}\mathbf{a}^{(\ell)}_{h}[i]=1.
+(20)
+Since 饾悮 ( 鈩?/mi> ) \mathbf{a}^{(\ell)} in Eq.聽 9 is a convex combination of valid per-head probability distributions, it also satisfies
+鈭?/mo> i = 1 N vis 饾悮 ( 鈩?/mi> ) 鈥?/mo> [ i ] = 1 , \sum_{i=1}^{N_{\mathrm{vis}}}\mathbf{a}^{(\ell)}[i]=1,
+(21)
+ensuring that the Shannon entropy in Eq.聽 10 is well-defined.
+Importantly, Eq.聽 12 averages entropy scalars across layers rather than attention distributions, so no cross-layer probability-distribution mixing occurs.
+Alternative Per-Head Entropy.
+We additionally consider an alternative formulation that computes entropy before aggregating across attention heads:
+鈩?/mi> per 鈥?/mo> - 鈥?/mo> head ( 鈩?/mi> ) \displaystyle\mathcal{H}^{(\ell)}_{\mathrm{per\text{-}head}}
+= 1 H 鈥?/mo> 鈭?/mo> h = 1 H 鈩?/mi> attn , h ( 鈩?/mi> ) , \displaystyle=\frac{1}{H}\sum_{h=1}^{H}\mathcal{H}^{(\ell)}_{\mathrm{attn},h},
+(22)
+鈩?/mi> attn , h ( 鈩?/mi> ) \displaystyle\mathcal{H}^{(\ell)}_{\mathrm{attn},h}
+= 鈭?/mo> 鈭?/mo> i = 1 N vis 饾悮 ( 鈩?/mi> ) h [ i ] log 饾悮 ( 鈩?/mi> ) h [ i ] . \displaystyle=-\sum_{i=1}^{N_{\mathrm{vis}}}\mathbf{a}^{(\ell)}_{h}[i]\log\mathbf{a}^{(\ell)}_{h}[i].
+Here, Shannon entropy is computed separately for each per-head attention distribution, and the resulting entropy values are then averaged across heads.
+As shown in Table聽 13 , this formulation selects the same layers and yields a similar threshold and comparable performance to our default formulation, indicating that the entropy signal is robust to the choice of aggregation scheme.
+Table 13 : Comparison between the default head-averaged entropy and the alternative per-head entropy formulation on ReasonSeg, reported without Bidirectional Rethinking. The two formulations yield identical layer selection and comparable performance.
+Formulation
+Layers
+蟿 \tau
+ReasonSeg (gIoU)
+val聽/聽test
+Default (head-averaged)
+23, 24, 25
+6.21
+65.2聽/聽64.0
+Per-head entropy
+23, 24, 25
+6.16
+65.5聽/聽64.1
+B Additional Experiment Results
+B.1 Layer and Threshold Determination
+Table 14 : Layers and thresholds selected during the layer and threshold determination phase using the proxy set.
+Model
+Selected Layers
+Thresholds
+Seg-Zero-7B聽 [ 22 ]
+8, 23, 24
+5.95
+VisionReasoner-7B聽 [ 23 ]
+23, 24, 25
+6.32
+Qwen2.5VL-7B聽 [ 2 ]
+23, 24, 25
+6.21
+Qwen2.5VL-32B聽 [ 2 ]
+44, 45, 58
+5.15
+Qwen2.5VL-72B聽 [ 2 ]
+63, 73, 74
+5.93
+Qwen3VL-8B聽 [ 1 ]
+8, 31, 33
+5.09
+GLM4.1V-9B聽 [ 9 ]
+7, 23, 26
+5.71
+Table聽 14 presents the determined layers and thresholds for various MLLMs evaluated in Table聽 5 . These parameters are obtained using k = 3 k=3 on the proxy set ( 饾挓 proxy \mathcal{D}_{\text{proxy}} ) as described in Section聽 4.2 of the main paper.
+The selected layers exhibit different patterns depending on the model architecture. In the case of the Qwen2.5-VL series, we observe a tendency for the selected layers to shift toward later positions as the model size increases.
+Furthermore, this selection naturally aligns with recent studies聽 [ 12 , 47 ] that highlight the mid-to-late layers of MLLMs as the critical locus for visual grounding and semantic reasoning聽 [ 46 ] . Because these layers are responsible for specifying visual evidence鈥攄istinct from early feature processing or final decoding鈥攈igh attention entropy in this specific interval serves as an intuitive and theoretically supported proxy for the model鈥檚 uncertainty.
+B.2 Robustness of Proxy Set Construction
+DA-CoT determines the entropy-sensitive layer set 鈩?/mi> \mathcal{L} and the threshold 蟿 \tau from a proxy set 饾挓 proxy \mathcal{D}_{\text{proxy}} of 1,000 1{,}000 image鈥搎uery pairs randomly sampled from segmentation training splits聽 [ 14 , 44 ] (Sec. 4.2 ). To further validate the reliability of this proxy-based determination, we conduct a comprehensive robustness study across three different proxy constructions, all reported without Bidirectional Rethinking. A desirable property of such a determination is that the resulting parameters reflect an intrinsic property of the model rather than the specific composition of the proxy. Throughout these tests, the determination procedure remains label- and mask-free: category metadata is used only to construct the proxy variants below and never enters the attention-entropy computation.
+(i) Seed variation. We resample the proxy with five random seeds and report the mean and standard deviation of the resulting parameters and performance.
+(ii) Category-balanced proxy. We sample uniformly across COCO categories so that all categories are equally represented in the proxy.
+(iii) Target-category-disjoint proxy. To evaluate generalization to categories not represented in the proxy, we map ReasonSeg target descriptions to COCO categories and remove every RefCOCO/+/g pair whose target category falls in this set, yielding a 1,000 1{,}000 -sample proxy with zero target-category overlap with the mapped evaluation categories.
+As shown in Table聽 15 , all three settings select the identical layer set { 23 , 24 , 25 } \{23,24,25\} and a near-identical threshold, and yield gIoU comparable to the default proxy鈥攚ith the category-balanced variant even slightly higher. In particular, the target-category-disjoint proxy聽(iii), which shares no target category with the evaluation set, performs on par with the default. These results show that the proxy estimates a model-level attention-dispersion signal that is independent of category composition, confirming that DA-CoT鈥檚 parameter determination remains reliable across diverse proxy constructions.
+Table 15 : Robustness of DA-CoT to proxy set construction on the ReasonSeg benchmark, reported without Bidirectional Rethinking. Despite varying the sampling seed, category balance, and target-category coverage, the selected layers, threshold 蟿 \tau , and gIoU remain stable.
+Setting
+Layers
+蟿 \tau
+ReasonSeg (gIoU)
+val
+test
+Default proxy
+23, 24, 25
+6.21
+65.2
+64.0
+5-seed random
+23, 24, 25
+6.23 卤 \pm 0.1
+65.0 卤 \pm 0.3
+64.2 卤 \pm 0.1
+Category-balanced proxy
+23, 24, 25
+6.38
+66.3
+64.6
+Target-cat.-disjoint proxy
+23, 24, 25
+6.06
+65.0
+64.0
+B.3 Robustness in Proxy-Set-Free Environments.
+To investigate whether our framework remains effective even when a predefined proxy set ( 饾挓 proxy \mathcal{D}_{\text{proxy}} ) is unavailable, we evaluate its performance in a completely proxy-set-free setting. This analysis is not used for our main comparisons, which use the fixed proxy set described in Sec.聽 4.2 ; it is included only to evaluate robustness when no external proxy set is available. Specifically, we dynamically determine the entropy-sensitive layers L L and the threshold 蟿 \tau by randomly sampling a mere 5 % 5\% of the target test set鈥?span id="S2.SS3a.p1.1.1" class="ltx_text ltx_font_bold">using solely the raw input images and text queries without any ground-truth labels . As shown in Table聽 16 , despite relying on such a minimal and entirely unlabeled subset, this proxy-set-free approach achieves highly competitive performance compared to our default setting that utilizes the full 饾挓 proxy \mathcal{D}_{\text{proxy}} . Furthermore, the identified layers and threshold values closely mirror the trends observed in our primary experiments. This suggests that DA-CoT can determine its layers and threshold dynamically from a small unlabeled subset when no predefined proxy set is available.
+Table 16 : Comparison between DA-CoT and DA-CoT (w/o proxy set) on ReasonSeg benchmark. Performance is reported as gIoU.
+Method
+ReasonSeg
+Selected
+Layers ( L L )
+Threshold ( 蟿 \tau )
+val
+test
+DA-CoT
+68.0
+64.6
+23, 24, 25
+6.21
+DA-CoT (w/o proxy set)
+67.6
+64.2
+23, 24, 25
+6.24
+B.4 Per-Sample CoT Benefit: Target-Size Control
+Since attention entropy could reflect target size rather than difficulty, we examine the two on the same held-out samples as Fig.聽 3 (b鈥揹).
+Entropy correlates moderately with target size (GT mask area as log fraction of the image; Spearman 蟻 = + 0.42 \rho=+0.42 ; Fig.聽 7 ), yet the entropy-benefit relation survives size control: the rank-based partial correlation of entropy with 螖 鈥?/mo> IoU \Delta\text{IoU} given log target size is + 0.57 +0.57 , and within each size tercile entropy still predicts per-sample CoT benefit (AUC = 0.88 / 0.85 / 0.81 =0.88/0.85/0.81 for small/medium/large targets).
+As inputs are resized to 840 脳 840 840\times 840 , the visual-token count is constant ( N vis = 900 N_{\text{vis}}=900 ), so normalized entropy 鈩?/mi> / log 鈦?/mo> N vis \mathcal{H}/\log N_{\text{vis}} is a fixed rescaling of 鈩?/mi> \mathcal{H} and leaves all rank statistics unchanged.
+Figure 7 : Attention entropy vs. ground-truth target size on held-out ReasonSeg val+test. Annotations report the within-size-tercile AUC of entropy for per-sample CoT benefit.
+B.5 Additional comparison on ReasonSeg.
+For completeness, we summarize zero-shot performance on the ReasonSeg test set in terms of both g 鈥?/mo> I 鈥?/mo> o 鈥?/mo> U gIoU and c 鈥?/mo> I 鈥?/mo> o 鈥?/mo> U cIoU in Table聽 17 , covering a range of training-based and training-free baselines.
+Table 17 : Performance comparison with zero-shot models on ReasonSeg test set. Performance is reported as gIoU and cIoU.
+鈥?/span> denotes performance re-evaluated by聽 [ 10 ] .
+Method
+Venue
+Base model
+gIoU
+cIoU
+Training
+LISA聽 [ 16 ]
+CVPR鈥?024
+LLaVA1.5-7B
+48.7
+48.8
+鉁?/td>
+LISA聽 [ 16 ]
+CVPR鈥?024
+LLaVA1.5-13B
+53.8
+50.8
+鉁?/td>
+Seg-Zero聽 [ 22 ]
+Qwen2.5-VL 3B
+56.1
+48.6
+鉁?/td>
+RSVP聽 [ 25 ]
+ACL鈥?025
+Qwen2-VL 7B
+56.6
+51.6
+脳 \times
+RSVP聽 [ 25 ]
+ACL鈥?025
+Gemini-Flash
+57.1
+59.2
+脳 \times
+Seg-Zero 鈥?/span> 聽 [ 22 ]
+Qwen2.5-VL 7B
+58.3
+53.4
+鉁?/td>
+SAM-R1聽 [ 10 ]
+NeurIPS鈥?025
+Qwen2.5-VL 7B
+60.2
+54.3
+鉁?/td>
+RSVP聽 [ 25 ]
+ACL鈥?025
+GPT-4o
+60.3
+60.0
+脳 \times
+SAM-Veteran聽 [ 7 ]
+ICLR鈥?026
+Qwen2.5-VL 7B
+62.6
+56.1
+鉁?/td>
+SAM3 Agent聽 [ 3 ]
+ICLR鈥?026
+Qwen2.5-VL 7B
+63.0
+53.5
+脳 \times
+VisionReasoner聽 [ 23 ]
+ICLR鈥?026
+Qwen2.5-VL 7B
+63.6
+55.7
+鉁?/td>
+DA-CoT (Ours)
+Qwen2.5-VL 7B
+64.6
+58.6
+脳 \times
+DA-CoT (Ours)
+Qwen2.5-VL 32B
+64.9
+56.1
+脳 \times
+DA-CoT (Ours)
+GLM4.1V-9B
+66.7
+58.9
+脳 \times
+DA-CoT (Ours)
+Qwen2.5-VL 72B
+68.0
+60.9
+脳 \times
+DA-CoT (Ours)
+Qwen3-VL 8B
+69.1
+64.4
+脳 \times
+C Bidirectional Rethinking Analysis
+The Bidirectional Rethinking (BiReT) mechanism is designed to enhance the robustness of our framework by providing a rule-based fallback strategy. As explained in the main paper (Sec.聽 4.3 ), BiReT is automatically activated when the initial reasoning path selected by DA-CoT fails to produce a valid output (e.g., missing coordinates or empty coordinate fields). Such failures indicate a mismatch between the estimated difficulty and the reasoning path actually required for the sample. BiReT then provides a second chance for the model to generate a valid output by issuing a flipping signal , which switches the reasoning strategy from Non-CoT to CoT, or vice versa.
+C.1 Rule-based Failure Detection
+To make this trigger precise, BiReT relies on a strict rule-based failure detection mechanism rather than vague criteria. The flipping signal refers to switching the reasoning strategy from Non-CoT to CoT, or vice versa. If the flipped second pass still fails to produce a valid output, we regard the sample as a final failure of the model. As illustrated in Figure聽 8 , BiReT is triggered when:
+(1) the structural components of the JSON output (marked in red ) are incomplete, such as missing closing brackets, or
+(2) the coordinate values (marked in blue) are empty, even when the JSON format itself is valid.
+During the design of BiReT, we empirically observed a strong correlation between instances of overthinking or underthinking and the breakdown of the output鈥檚 structural integrity. As illustrated in Figure聽 9 , failures to complete the JSON format or omissions of bounding box coordinates serve as strong indicators that the reasoning process has derailed. This empirical finding served as the primary motivation for adopting our lightweight, rule-based failure detection logic. BiReT is executed at most once per sample.
+Figure 8 : Response format and rule-based failure detection criteria for BiReT. The mechanism triggers a flipping signal when structural components shown in red are incomplete or coordinate values shown in blue are missing.
+Figure 9 : Qualitative examples of BiReT.
+C.2 Activation Frequency and Recovery Behavior
+To quantify the practical effectiveness and efficiency of this mechanism, we analyzed its activation frequency and recovery behavior on the ReasonSeg benchmark.
+Table 18:
+Efficiency and Efficacy of the BiReT Mechanism.
+Both recovery rates are computed over the triggered samples.
+Metric
+val
+test
+Trigger Rate (%)
+5.0
+4.6
+Valid Recovery Rate (%)
+80.0
+97.2
+Correct Recovery Rate (%)
+70.0
+22.2
+Table 19 :
+Performance and latency are measured on the ReasonSeg Benchmark.
+Method
+ReasonSeg (gIoU)
+time/img (sec)
+val
+test
+Qwen 2.5-VL 7B
+63.0
+60.7
+9.9
++ DA-CoT
+65.2 ( 鈫?/mo> \uparrow 2.2)
+64.0 ( 鈫?/mo> \uparrow 3.3)
+4.4
++ BiReT
+68.0 ( 鈫?/mo> \uparrow 2.8)
+64.6 ( 鈫?/mo> \uparrow 0.6)
+4.7
+As shown in Table聽 18 , BiReT is triggered for about 5% of the total samples, exactly those where the selected reasoning mode fails to produce a valid output, and flipping the reasoning strategy restores a valid output for 97.2% of them on test (80.0% on val). As reported in Table聽 11 , the restored output is also correct (IoU > > 0.5) for 22.2% of the initially failed test samples (70.0% on val), whereas UniReT never exceeds 2.8%: the strategy flip, not the retry itself, is what produces the correct recoveries. Since a training-free mechanism cannot add knowledge to the backbone, we view BiReT primarily as an output-reliability component that provides a usable prediction at + 0.3 +0.3 s latency, contributing a further + 0.6 +0.6 test gIoU on top of DA-CoT.
+C.3 Design Motivation and Efficiency
+Admittedly, one could consider more sophisticated verification methods as the trigger condition for BiReT. For instance, the model could be prompted to perform self-correction on its generated reasoning chain and predicted regions via an additional forward pass, or a more capable external model could be deployed as a 鈥淛udge鈥?to evaluate the correctness of the initial output. However, such approaches inevitably incur substantial computational costs and latency overheads.
+In contrast, our lightweight, rule-based BiReT demonstrates its efficiency, restoring a valid output for up to 97.2% of initially failed samples purely through strategy switching, without requiring any additional verification forward passes or heavy external models. Consequently, this simple rule-based mechanism strikes an optimal balance, simultaneously maximizing both the computational efficiency and output reliability of our framework. As quantitatively demonstrated in Table聽 19 , integrating BiReT incurs a minimal latency overhead of 0.3 seconds per image (from 4.4s to 4.7s), successfully preserving the substantial speedup achieved by DA-CoT.
+D Qualitative Analysis and Case Studies
+D.1 Further Examples of CoT-Beneficial and CoT-Detrimental Cases
+To further substantiate the core claim of our paper鈥攖hat the indiscriminate use of Chain-of-Thought prompting can induce overthinking and necessitates an adaptive approach鈥攚e present additional qualitative examples where CoT is either beneficial or detrimental to the reasoning process.
+CoT-Detrimental Cases
+Figure聽 12 provides additional examples of CoT-detrimental cases where CoT prompting leads to performance degradation. As noted in the main paper, these are instances where the model already exhibits high confidence (indicated by low attention entropy) in localizing the correct region without CoT. However, forcibly applying CoT induces an unnecessary and convoluted reasoning process (overthinking). This can dilute the model鈥檚 focus or lead it down an incorrect logical path, ultimately resulting in a misgrounded prediction.
+CoT-Beneficial Cases
+Conversely, Figure聽 13 presents additional CoT-beneficial cases where CoT plays a crucial role in improving reasoning performance. These examples typically arise when a query is challenging for the MLLM to ground or when visual cues are ambiguous, causing the model to initially exhibit high uncertainty (reflected by high attention entropy). In such scenarios, CoT guides the model to break down the problem into intermediate steps and follow a structured reasoning process. This guidance is decisive in helping the model accurately identify the correct target region.
+D.2 Quantitative Analysis of CoT-Induced Failures
+Beyond the qualitative case studies of CoT-detrimental examples, we provide a quantitative error analysis that characterizes how indiscriminate CoT prompting degrades grounding. We focus on CoT-detrimental cross-over cases : samples that the model grounds correctly without CoT ( IoU NonCoT > 0.5 \mathrm{IoU}_{\mathrm{NonCoT}}>0.5 ) but fails once CoT is applied ( IoU CoT 鈮?/mo> 0.5 \mathrm{IoU}_{\mathrm{CoT}}\leq 0.5 ). Such cases isolate the failures directly attributable to overthinking, since the only change between the two runs is the activation of CoT. We randomly sample 165 such cross-over cases pooled from the ReasonSeg val and test splits, and assign each to its dominant failure cause: spatial confusion (the prediction drifts to a wrong instance during spatial reasoning), semantic drift (the prediction shifts to a semantically related but incorrect object), visual hallucination (the model grounds to an object that is not present), and format errors / others (malformed or incomplete output structure).
+As shown in Table聽 20 , spatial confusion is by far the dominant failure mode (50.3%), followed by semantic drift (18.8%), visual hallucination (16.4%), and format errors (14.5%). This indicates that the unnecessary reasoning steps introduced by CoT most frequently derail grounding through spatial-logic errors rather than perceptual mistakes. The result quantitatively substantiates our central claim that overthinking compromises visual grounding, and shows that this degradation manifests through structured, spatially-grounded failures specific to pixel-level grounding鈥攄irectly motivating our difficulty-aware, adaptive CoT gating.
+Table 20 : Failure-mode breakdown of 165 randomly sampled CoT-detrimental cross-over cases ( IoU NonCoT > 0.5 鈭?/mo> IoU CoT 鈮?/mo> 0.5 \mathrm{IoU}_{\mathrm{NonCoT}}>0.5\wedge\mathrm{IoU}_{\mathrm{CoT}}\leq 0.5 ) on ReasonSeg. Spatial confusion is the dominant failure mode, indicating that unnecessary reasoning most often derails grounding through spatial-logic errors.
+Failure Cause
+Proportion (%)
+Spatial confusion
+50.3
+Semantic drift
+18.8
+Visual hallucination
+16.4
+Format errors / others
+14.5
+D.3 Overthinking in CoT-Optimized Models
+Even models specifically trained for CoT reasoning, such as VisionReasoner聽 [ 23 ] , are not immune to the problem of 鈥榦verthinking.鈥?Figure聽 10 illustrates that for queries the model can answer correctly without CoT, enforcing a reasoning process can be counterproductive. As seen in the figure, the forced CoT process induces unnecessary reasoning steps that lead to model failure. This demonstrates an instance of 鈥榦verthinking,鈥?where the enforced reasoning process itself contributes to error, even though the model inherently possesses correct grounding and reasoning capabilities. By mitigating such failure modes, our method leads to performance improvements even when applied to CoT-optimized models, as is quantitatively confirmed in Table聽 5 of the main paper. This observation highlights the potential value of an adaptive mechanism like DA-CoT, which dynamically selects the reasoning path.
+Figure 10 : Overthinking of VisionReasoner
+D.4 Failure Cases and Limitations of DA-CoT
+The effectiveness of DA-CoT is predicated on the model鈥檚 attention entropy, and a limitation arises when this intrinsic signal does not perfectly reflect the model鈥檚 true understanding. The key limitation we identified is the 鈥檆onfidently wrong鈥?scenario, where the model focuses on an incorrect region with high confidence (i.e., low entropy).
+As shown in Figure聽 11 , the model鈥檚 attention map is sharply localized on a specific region, yielding a low entropy value. Based on this signal, DA-CoT judges the model to be highly confident and, as designed, does not activate Chain-of-Thought. Consequently, the model performs a direct prediction based on its flawed initial grounding, leading to an incorrect answer.
+On the surface, this might appear to be an issue of incorrect reasoning path selection. However, our experiments confirmed that even when CoT was forcibly applied in such cases, the MLLM still failed to arrive at the correct answer.
+This suggests that the issue is less about 鈥榬easoning path selection鈥?and more related to a fundamental limitation in the MLLM鈥檚 own perceptual capabilities. This includes cases where the model initially misinterprets the query or image, or lacks the prerequisite knowledge about the scene.
+This analysis clarifies both the limitations and the scope of DA-CoT鈥檚 contribution. As a training-free framework, DA-CoT cannot expand a model鈥檚 fundamental perceptual abilities or directly correct its recognition errors. Instead, its core contribution lies in maximizing a model鈥檚 potential performance by preventing unnecessary reasoning and selectively activating CoT only when needed.
+Figure 11 : Failure Cases of DA-CoT
+Figure 12 : CoT-Detrimental Cases
+Figure 13 : CoT-Beneficial Cases
+Experimental support, please
+view the build logs
+for errors. Generated by
+xml
+Instructions for reporting errors
+We are continuing to improve HTML versions of papers, and your feedback helps enhance accessibility and mobile
+support. To report errors in the HTML that will help us improve conversion and rendering, choose any of the
+methods listed below:
+Click the "Report Issue" (
+) button, located in the page header.
+Tip: You can select the relevant text first, to include it in your report.
+Our team has already identified the following issues . We appreciate your time reviewing and reporting rendering errors we
+may not have found yet. Your efforts will help us improve the HTML versions for all readers, because disability
+should not be a barrier to accessing research. Thank you for your continued support in championing open access for
+all.
+Have a free development cycle? Help support accessibility at arXiv! Our collaborators at LaTeXML maintain a list of packages that need conversion , and welcome developer contributions .
+We gratefully acknowledge support from our major funders ,
+member institutions , ,
+and all contributors.
+About &middot;
+Help &middot;
+Contact &middot;
+Subscribe &middot;
+Copyright &middot;
+Privacy &middot;
+Accessibility &middot;
+Operational Status (opens in new tab)
